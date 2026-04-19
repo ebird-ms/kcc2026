@@ -1453,7 +1453,10 @@ function adjustClassesArray(item) {
 
 function getAppliedRate(code) {
   if (code === 'KRW') return 1;
-  return fxRates[code]?.applied || 0;
+  const applied = fxRates[code]?.applied || 0;
+  // per100 통화(JPY, VND 등)는 저장된 환율이 100단위 기준이므로 100으로 나눔
+  if (CONFIG.currencies[code]?.per100) return applied / 100;
+  return applied;
 }
 
 /* ============================================
