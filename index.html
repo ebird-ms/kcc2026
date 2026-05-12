@@ -4874,6 +4874,12 @@ const MADRID_AGENT_PER_COUNTRY_CLASS = 350000; // 국가별 류당
 const MADRID_REMIT_CHF = 35;
 const MADRID_REMIT_KRW = 13000;
 
+/* v9.14: 한국 기초출원 우선심사 (별도추가 고정, 류당 단가)
+   - 한국 기초출원이 있을 때만 신청 가능
+   - 수행기관 수수료: VAT 과세 / KIPO 관납료: VAT 비과세 */
+const MADRID_KR_PRIORITY_AGENT_PER_CLASS = 140000;
+const MADRID_KR_PRIORITY_OFFICIAL_PER_CLASS = 160000;
+
 /* 마드리드 지정국 수수료 (WIPO 공식 기준, 2026년 4월 26일 최종 갱신)
    출처: https://www.wipo.int/en/web/madrid-system/fees/ind_taxes
    기초출원: 항상 한국 / collective·certification·guarantee mark은 항상 해당 없음으로 가정.
@@ -4955,6 +4961,8 @@ function calcMadridCountryFee(code, n) {
 /* ===== 마드리드 전체 계산 (v9.8: 사후지정 지원) ===== */
 function calcMadridTotal(item) {
   const m = item.madrid || {};
+  // v9.14: priority 기본값 보강 (기존 견적 호환)
+  if (!m.priority) m.priority = { enabled: false, classCount: 1, memo: '' };
   const designations = Array.isArray(m.designations) ? m.designations : [];
   const isColor = !!m.isColor;
   const transactionType = m.transactionType === 'subsequent' ? 'subsequent' : 'new';
@@ -5036,6 +5044,21 @@ function calcMadridTotal(item) {
   const remitCHFAsKRW = Math.round(MADRID_REMIT_CHF * chfRate);
   const remitKRWTotal = remitCHFAsKRW + MADRID_REMIT_KRW;
 
+  // 8) v9.14: 한국 기초출원 우선심사 (별도추가, 류당 단가)
+  // 한국 기초출원이 없으면 무력화. 류수는 krBaseClassCount 이하로 클램프.
+  let krPriorityEnabled = false;
+  let krPriorityClassCount = 0;
+  let krPriorityAgent = 0;
+  let krPriorityOfficial = 0;
+  if (m.includeKrBase && m.priority?.enabled) {
+    krPriorityEnabled = true;
+    const maxN = Math.max(1, parseInt(m.krBaseClassCount) || 1);
+    const reqN = Math.max(1, parseInt(m.priority.classCount) || 1);
+    krPriorityClassCount = Math.min(maxN, reqN);
+    krPriorityAgent = MADRID_KR_PRIORITY_AGENT_PER_CLASS * krPriorityClassCount;
+    krPriorityOfficial = MADRID_KR_PRIORITY_OFFICIAL_PER_CLASS * krPriorityClassCount;
+  }
+
   return {
     isColor, basicFee, basicFeeKRW,
     transactionType, isSubsequent,
@@ -5049,6 +5072,8 @@ function calcMadridTotal(item) {
     totalDomesticOfficial: krBaseOfficial,
     totalForeignKRW: wipoFeesKRW,
     totalOtherKRW: remitKRWTotal,
+    // v9.14: 우선심사 블록
+    krPriorityEnabled, krPriorityClassCount, krPriorityAgent, krPriorityOfficial,
     // 각 구성요소별 소계 (카드 표시용)
     // 국내 기초출원: 수행기관(krBaseAgent) + 국내관납료(krBaseOfficial)
     krSubtotal: krBaseAgent + krBaseOfficial,
@@ -5550,7 +5575,9 @@ function createItem(country='KR', type='trademark') {
       includeKrBase: false,
       krBaseClassCount: 1,
       krClasses: [createClassEntry()],
-      designations: []
+      designations: [],
+      // v9.14: 한국 기초출원 우선심사 (별도추가 고정)
+      priority: { enabled: false, classCount: 1, memo: '' }
     },
     // 저작권 전용 필드 (v8.21~) — type === 'copyright' 일 때만 사용
     copyright: {
@@ -6973,7 +7000,7 @@ function loadQuoteFromKey(key) {
       filingPresetId: it.filingPresetId || null,
       useRegistration: !!it.useRegistration,
       registrationPresetId: it.registrationPresetId || null,
-      madrid: it.madrid || { isColor: false, madridBaseClassCount: 1, includeKrBase: false, krBaseClassCount: 1, designations: [] },
+      madrid: it.madrid || { isColor: false, madridBaseClassCount: 1, includeKrBase: false, krBaseClassCount: 1, designations: [], priority: { enabled: false, classCount: 1, memo: '' } },
       // 저작권 전용 필드 (v8.21~) — 이전 데이터에는 없으므로 기본값 채움
       copyright: it.copyright ? {
         worksCount: it.copyright.worksCount || 1,
@@ -7191,6 +7218,42 @@ function computeAggregates() {
           }
         });
       }
+      return;
+    }
+    // v9.14: 마드리드 우선심사 분리 처리
+    // - 본체: item.supportMode 그대로 (support/extra/none)
+    // - 우선심사: 무조건 'extra'
+    if (x.r.isMadrid && x.r.extraPart && x.r.extraPart.supply > 0) {
+      const sp = x.r.supportPart;
+      const mainRow = {
+        idx: x.idx, rightIdx: x.rightIdx, item: x.item, mode: x.mode,
+        r: {
+          ...x.r,
+          _madridSplitRole: 'main',
+          supply: sp.supply, vat: sp.vat, totalKRW: sp.total,
+          vatableSupply: sp.vatableSupply, nonVatableSupply: sp.nonVatableSupply,
+          agentFee: sp.agentFee, domesticOfficial: sp.domesticOfficial,
+          foreignCostKRW: sp.foreignCostKRW, otherKRW: sp.otherKRW,
+          extraPart: null
+        }
+      };
+      if (x.mode === 'support') supportItems.push(mainRow);
+      else if (x.mode === 'extra') extraItems.push(mainRow);
+      else noneItems.push(mainRow);
+
+      const ep = x.r.extraPart;
+      extraItems.push({
+        idx: x.idx, rightIdx: x.rightIdx, item: x.item, mode: 'extra',
+        r: {
+          ...x.r,
+          _madridSplitRole: 'priority',
+          supply: ep.supply, vat: ep.vat, totalKRW: ep.total,
+          vatableSupply: ep.agentFee, nonVatableSupply: ep.official,
+          agentFee: ep.agentFee, domesticOfficial: ep.official,
+          foreignCostCur: 0, foreignCostKRW: 0, otherKRW: 0,
+          extraPart: null
+        }
+      });
       return;
     }
     // 일반 항목 (PCT/Intl 특허는 여기로)
@@ -8185,7 +8248,10 @@ function renderSummary() {
       const designCount = (item.madrid?.designations || []).length;
       const maxClasses = m.maxClasses || 0;
       const txTypeLabel = m.isSubsequent ? '사후지정' : '국제출원';
-      titleText = `${String(idx+1).padStart(2,'0')} · 마드리드 ${txTypeLabel} ${designCount}개국 · ${maxClasses}개류${item.mark ? ' · ' + escapeHtml(item.mark) : ''}`;
+      // v9.14: 분할 항목 표기
+      const madridRole = r._madridSplitRole;
+      const madridSplitTag = madridRole === 'main' ? ' (본체)' : madridRole === 'priority' ? ' (우선심사)' : '';
+      titleText = `${String(idx+1).padStart(2,'0')} · 마드리드 ${txTypeLabel} ${designCount}개국 · ${maxClasses}개류${item.mark ? ' · ' + escapeHtml(item.mark) : ''}${madridSplitTag}`;
     } else {
       titleText = `${String(idx+1).padStart(2,'0')} · ${escapeHtml(country.name)} ${r.n}개류${item.mark ? ' · ' + escapeHtml(item.mark) : ''}`;
     }
@@ -8200,8 +8266,8 @@ function renderSummary() {
       <div class="val" data-label="소계"><span class="primary-val">${fmtKRW(r.totalKRW)}</span></div>
     </div>`;
 
-    // 마드리드 sub-rows
-    if (isMadrid) {
+    // 마드리드 sub-rows (v9.14: priority 분할 행은 sub-row 생략 — 자체가 1줄 요약)
+    if (isMadrid && r._madridSplitRole !== 'priority') {
       const m = r.madrid;
       if (item.madrid?.includeKrBase) {
         out += `<div class="summary-row sub">
@@ -8473,7 +8539,10 @@ function renderSummary() {
             const m = r.madrid;
             const designCount = (item.madrid?.designations || []).length;
             const txTypeLabel = m.isSubsequent ? '사후지정' : '국제출원';
-            titleText = `${String(idx+1).padStart(2,'0')} · 마드리드 ${txTypeLabel} ${designCount}개국 · ${m.maxClasses || 0}개류${item.mark ? ' · ' + escapeHtml(item.mark) : ''}`;
+            // v9.14: 분할 항목 표기
+            const madridRole = r._madridSplitRole;
+            const madridSplitTag = madridRole === 'main' ? ' (본체)' : madridRole === 'priority' ? ' (우선심사)' : '';
+            titleText = `${String(idx+1).padStart(2,'0')} · 마드리드 ${txTypeLabel} ${designCount}개국 · ${m.maxClasses || 0}개류${item.mark ? ' · ' + escapeHtml(item.mark) : ''}${madridSplitTag}`;
           } else {
             titleText = `${String(idx+1).padStart(2,'0')} · ${escapeHtml(country.name)} ${r.n}개류${item.mark ? ' · ' + escapeHtml(item.mark) : ''}`;
           }
@@ -8488,8 +8557,8 @@ function renderSummary() {
             <div class="val" data-label="소계"><span class="primary-val">${fmtKRW(r.totalKRW)}</span></div>
           </div>`;
 
-          // 마드리드 상세 행 (하위)
-          if (isMadrid) {
+          // 마드리드 상세 행 (하위) — v9.14: priority 분할 행은 sub-row 생략
+          if (isMadrid && r._madridSplitRole !== 'priority') {
             const m = r.madrid;
             if (item.madrid?.includeKrBase) {
               extraRows += `<div class="extra-detail-row sub">
@@ -8634,7 +8703,12 @@ function applyReadOnlyUI() {
   pinInput.type = readOnly ? 'password' : 'text';
 }
 
-/* ===== 마드리드 아이템 계산 ===== */
+/* ===== 마드리드 아이템 계산 =====
+ * v9.14: 한국 기초출원 우선심사 분리 처리
+ *   - supportPart: 기존 마드리드 전체 (item.supportMode에 따라 VAT 규칙 적용)
+ *   - extraPart: 우선심사 (항상 별도추가 — agentFee만 VAT 과세)
+ *   - 표면 supply/vat/totalKRW는 두 블록 합. computeAggregates가 분할 처리.
+ */
 function calcMadridItem(item) {
   const m = calcMadridTotal(item);
   const n = (item.madrid?.designations || []).length;
@@ -8650,20 +8724,34 @@ function calcMadridItem(item) {
   const foreignCostCur = m.wipoFeesCHF;
   const foreignCostKRW = m.wipoFeesKRW;
   const otherKRW = m.remitKRWTotal;
-  const supply = agentFee + domesticOfficial + foreignCostKRW + otherKRW;
+  const supplyMain = agentFee + domesticOfficial + foreignCostKRW + otherKRW;
 
   const mode = item.supportMode || 'support';
-  let vat, vatableSupply, nonVatableSupply;
+  let vatMain, vatableSupplyMain, nonVatableSupplyMain;
   if (mode === 'extra') {
-    vatableSupply = agentFee;
-    nonVatableSupply = domesticOfficial + foreignCostKRW + otherKRW;
-    vat = Math.round(vatableSupply * 0.1);
+    vatableSupplyMain = agentFee;
+    nonVatableSupplyMain = domesticOfficial + foreignCostKRW + otherKRW;
+    vatMain = Math.round(vatableSupplyMain * 0.1);
   } else {
-    vatableSupply = supply;
-    nonVatableSupply = 0;
-    vat = Math.round(supply * 0.1);
+    vatableSupplyMain = supplyMain;
+    nonVatableSupplyMain = 0;
+    vatMain = Math.round(supplyMain * 0.1);
   }
-  const totalKRW = supply + vat;
+  const totalMain = supplyMain + vatMain;
+
+  // v9.14: 우선심사 블록 (항상 별도추가 규칙 — 수행기관만 VAT 과세)
+  const priorityAgentFee = m.krPriorityAgent || 0;
+  const priorityOfficial = m.krPriorityOfficial || 0;
+  const prioritySupply = priorityAgentFee + priorityOfficial;
+  const priorityVat = Math.round(priorityAgentFee * 0.1);
+  const priorityTotal = prioritySupply + priorityVat;
+
+  // 항목 전체 합계 (본체 + 우선심사)
+  const supply = supplyMain + prioritySupply;
+  const vat = vatMain + priorityVat;
+  const totalKRW = totalMain + priorityTotal;
+  const vatableSupply = vatableSupplyMain + priorityAgentFee;
+  const nonVatableSupply = nonVatableSupplyMain + priorityOfficial;
 
   return {
     country: pseudoCountry, curCode: 'CHF', rate: m.chfRate, n,
@@ -8676,7 +8764,21 @@ function calcMadridItem(item) {
     supportMode: mode,
     remitForeign: m.remitCHF, remitKRW: m.remitKRWOnly,
     madrid: m,
-    isMadrid: true
+    isMadrid: true,
+    // v9.14: 우선심사 표면 필드 + 블록 분리
+    krPriorityEnabled: !!m.krPriorityEnabled,
+    krPriorityClassCount: m.krPriorityClassCount || 0,
+    priorityAgentFee, priorityOfficial,
+    supportPart: {
+      supply: supplyMain, vat: vatMain, total: totalMain,
+      agentFee, domesticOfficial,
+      foreignCostKRW, otherKRW,
+      vatableSupply: vatableSupplyMain, nonVatableSupply: nonVatableSupplyMain
+    },
+    extraPart: m.krPriorityEnabled ? {
+      supply: prioritySupply, vat: priorityVat, total: priorityTotal,
+      agentFee: priorityAgentFee, official: priorityOfficial
+    } : null
   };
 }
 
@@ -10032,6 +10134,37 @@ function renderMadridItem(item, idx) {
       ${item.madrid?.includeKrBase && item.madrid?.krDetailOpen ? `
         <div class="madrid-row-detail">${renderMadridKrDetail(item, m)}</div>
       ` : ''}
+      ${item.madrid?.includeKrBase ? (() => {
+        const pri = item.madrid.priority || { enabled: false, classCount: 1, memo: '' };
+        const krN = Math.max(1, parseInt(item.madrid.krBaseClassCount) || 1);
+        const priN = Math.min(krN, Math.max(1, parseInt(pri.classCount) || 1));
+        const showClassSelect = pri.enabled && krN >= 2;
+        return `
+        <div class="madrid-priority-row" style="border-top:1px dashed #e6c200;background:#fffbea;padding:8px 12px;display:flex;flex-wrap:wrap;align-items:center;gap:10px;">
+          <label style="display:flex;align-items:center;gap:6px;font-weight:500;color:#856404;cursor:pointer;">
+            <input type="checkbox" data-madrid-priority-toggle ${pri.enabled ? 'checked' : ''}>
+            <span>⚡ 우선심사 신청</span>
+            <span style="font-size:11px;color:#a07700;font-weight:400;">류당 수행기관 ${fmtNum(MADRID_KR_PRIORITY_AGENT_PER_CLASS)}원 + 관납료 ${fmtNum(MADRID_KR_PRIORITY_OFFICIAL_PER_CLASS)}원 (별도추가, 고정)</span>
+          </label>
+          ${pri.enabled ? `
+            ${showClassSelect ? `
+              <div style="display:flex;align-items:center;gap:4px;">
+                <span style="font-size:12px;color:#856404;">대상 류수</span>
+                <select data-madrid-priority-classes>
+                  ${Array.from({length: krN}, (_,i)=>i+1).map(n =>
+                    `<option value="${n}" ${n==priN?'selected':''}>${n}개류</option>`
+                  ).join('')}
+                </select>
+              </div>
+            ` : ''}
+            <input type="text" data-madrid-priority-memo value="${escapeHtml(pri.memo || '')}" placeholder="대상 류 메모 (예: 제09류만 우선심사)" style="flex:1;min-width:180px;font-size:12px;">
+            <div style="font-size:12px;color:#856404;font-weight:600;white-space:nowrap;">
+              소계 ${fmtKRW(m.krPriorityAgent + m.krPriorityOfficial)} <span style="font-weight:400;color:#a07700;">(VAT 별도)</span>
+            </div>
+          ` : ''}
+        </div>
+        `;
+      })() : ''}
     </div>
 
     <!-- 마드리드 기본 비용 카드 (송금수수료 편입) -->
@@ -10317,20 +10450,39 @@ function renderMadridBreakdown(item, r) {
     `<span class="num">${MADRID_REMIT_CHF} CHF</span> <span class="op">×</span> <span class="num">₩${fmtRate(m.chfRate)}</span> <span class="op">+</span> <span class="num">${fmtNum(MADRID_REMIT_KRW)}원</span>`,
     fmtKRW(m.remitKRWTotal));
 
+  // v9.14: 우선심사 (별도추가 블록)
+  if (m.krPriorityEnabled) {
+    html += `<div class="breakdown-section-header" style="margin:8px 0 4px;padding:6px 10px;background:#fff4e6;border-left:3px solid #f76707;border-radius:4px;font-weight:600;color:#d9480f;font-size:0.92em;">⚡ 우선심사 신청 (별도추가, ${m.krPriorityClassCount}개류)</div>`;
+    html += row('우선심사 수행기관 수수료',
+      `<span class="num">${fmtNum(MADRID_KR_PRIORITY_AGENT_PER_CLASS)}원</span> <span class="op">×</span> <span class="num">${m.krPriorityClassCount}개류</span> <span class="muted">(VAT 과세)</span>`,
+      fmtKRW(m.krPriorityAgent));
+    html += row('우선심사 KIPO 관납료',
+      `<span class="num">${fmtNum(MADRID_KR_PRIORITY_OFFICIAL_PER_CLASS)}원</span> <span class="op">×</span> <span class="num">${m.krPriorityClassCount}개류</span> <span class="muted">(VAT 비과세)</span>`,
+      fmtKRW(m.krPriorityOfficial));
+  }
+
   const parts = [`<span class="num">${fmtNum(r.agentFee)}</span>`];
   if (r.domesticOfficial > 0) parts.push(`<span class="op">+</span> <span class="num">${fmtNum(r.domesticOfficial)}</span>`);
   parts.push(`<span class="op">+</span> <span class="num">${fmtNum(r.foreignCostKRW)}</span> <span class="muted">(WIPO)</span>`);
   parts.push(`<span class="op">+</span> <span class="num">${fmtNum(r.otherKRW)}</span> <span class="muted">(송금)</span>`);
+  if (m.krPriorityEnabled) {
+    parts.push(`<span class="op">+</span> <span class="num">${fmtNum(m.krPriorityAgent + m.krPriorityOfficial)}</span> <span class="muted">(우선심사)</span>`);
+  }
   html += row('공급가액 소계 (VAT 제외)', parts.join(' '), fmtKRW(r.supply));
-  html += row('부가세 (VAT 10%)', `<span class="num">${fmtNum(r.supply)}</span> <span class="op">×</span> <span class="num">10%</span>`, fmtKRW(r.vat));
+  // VAT 산식: 본체와 우선심사가 다른 규칙 적용 가능 — 표면 r.vat 사용
+  const vatFormula = m.krPriorityEnabled
+    ? `<span class="muted">본체 VAT + 우선심사 수행기관 × 10%</span>`
+    : `<span class="num">${fmtNum(r.vatableSupply)}</span> <span class="op">×</span> <span class="num">10%</span>`;
+  html += row('부가세 (VAT 10%)', vatFormula, fmtKRW(r.vat));
   html += rowTotal('총 합계 (VAT 포함)', `<span class="num">${fmtNum(r.supply)}</span> <span class="op">+</span> <span class="num">${fmtNum(r.vat)}</span>`, fmtKRW(r.totalKRW));
   return html;
 }
 
 function bindMadridEvents(wrapper, item) {
-  if (!item.madrid) item.madrid = { transactionType: 'new', isColor: false, madridBaseClassCount: 1, includeKrBase: false, krBaseClassCount: 1, krClasses: [], designations: [] };
+  if (!item.madrid) item.madrid = { transactionType: 'new', isColor: false, madridBaseClassCount: 1, includeKrBase: false, krBaseClassCount: 1, krClasses: [], designations: [], priority: { enabled: false, classCount: 1, memo: '' } };
   if (!item.madrid.transactionType) item.madrid.transactionType = 'new';
   if (!Array.isArray(item.madrid.krClasses)) item.madrid.krClasses = [];
+  if (!item.madrid.priority) item.madrid.priority = { enabled: false, classCount: 1, memo: '' };
 
   // supportMode
   wrapper.querySelectorAll('[data-sm-type]').forEach(cb => {
@@ -10402,6 +10554,10 @@ function bindMadridEvents(wrapper, item) {
   wrapper.querySelectorAll('[data-madrid-kr-toggle]').forEach(el => {
     el.addEventListener('change', e => {
       item.madrid.includeKrBase = e.target.checked;
+      // v9.14: 한국 기초출원 해제 시 우선심사도 자동 해제
+      if (!e.target.checked && item.madrid.priority) {
+        item.madrid.priority.enabled = false;
+      }
       render();
     });
   });
@@ -10417,7 +10573,44 @@ function bindMadridEvents(wrapper, item) {
         item.madrid.krClasses.push({ classNo: '', itemCount: 10, nonStandard: false, memo: '' });
       }
       while (item.madrid.krClasses.length > n) item.madrid.krClasses.pop();
+      // v9.14: 우선심사 류수 상한 보정
+      if (item.madrid.priority && (parseInt(item.madrid.priority.classCount) || 1) > n) {
+        item.madrid.priority.classCount = n;
+      }
       render();
+    });
+  });
+
+  // v9.14: 우선심사 토글
+  wrapper.querySelectorAll('[data-madrid-priority-toggle]').forEach(el => {
+    el.addEventListener('change', e => {
+      if (!item.madrid.priority) item.madrid.priority = { enabled: false, classCount: 1, memo: '' };
+      item.madrid.priority.enabled = e.target.checked;
+      if (e.target.checked) {
+        const krN = Math.max(1, parseInt(item.madrid.krBaseClassCount) || 1);
+        const cur = parseInt(item.madrid.priority.classCount) || 0;
+        item.madrid.priority.classCount = Math.min(krN, Math.max(1, cur || 1));
+      }
+      render();
+    });
+  });
+
+  // v9.14: 우선심사 대상 류수
+  wrapper.querySelectorAll('[data-madrid-priority-classes]').forEach(el => {
+    el.addEventListener('change', e => {
+      if (!item.madrid.priority) item.madrid.priority = { enabled: false, classCount: 1, memo: '' };
+      const krN = Math.max(1, parseInt(item.madrid.krBaseClassCount) || 1);
+      const n = Math.min(krN, Math.max(1, parseInt(el.value) || 1));
+      item.madrid.priority.classCount = n;
+      render();
+    });
+  });
+
+  // v9.14: 우선심사 메모 (계산 무관 → render 없음, blur 시 한 번만 갱신)
+  wrapper.querySelectorAll('[data-madrid-priority-memo]').forEach(el => {
+    el.addEventListener('input', () => {
+      if (!item.madrid.priority) item.madrid.priority = { enabled: false, classCount: 1, memo: '' };
+      item.madrid.priority.memo = el.value;
     });
   });
 
@@ -10580,7 +10773,8 @@ function bindItemEvents(wrapper, item) {
               krBaseClassCount: 1,
               krClasses: [{ classNo: '', itemCount: 10, nonStandard: false, memo: '' }],
               krDetailOpen: false,
-              designations: [createMadridDesignation('US')]
+              designations: [createMadridDesignation('US')],
+              priority: { enabled: false, classCount: 1, memo: '' }
             };
           }
         } else {
@@ -13046,9 +13240,20 @@ function buildMadridDetailTableHTML(item, r) {
     rows.push(`<tr><td>Supplementary Fee (3류 초과)</td><td class="num">${fmtKRW(m.suppFeeKRW)}</td><td>${m.suppFee} CHF</td></tr>`);
   }
 
+  // v9.14: 우선심사 (별도추가)
+  if (m.krPriorityEnabled) {
+    rows.push(`<tr><td colspan="3"><strong>⚡ 우선심사 신청 (별도추가, ${m.krPriorityClassCount}개류)</strong></td></tr>`);
+    rows.push(`<tr><td style="padding-left:20px;">우선심사 수행기관 수수료</td><td class="num">${fmtKRW(m.krPriorityAgent)}</td><td>${fmtNum(MADRID_KR_PRIORITY_AGENT_PER_CLASS)}원 × ${m.krPriorityClassCount}개류</td></tr>`);
+    rows.push(`<tr><td style="padding-left:20px;">우선심사 KIPO 관납료</td><td class="num">${fmtKRW(m.krPriorityOfficial)}</td><td>${fmtNum(MADRID_KR_PRIORITY_OFFICIAL_PER_CLASS)}원 × ${m.krPriorityClassCount}개류 (VAT 비과세)</td></tr>`);
+    if (item.madrid?.priority?.memo) {
+      rows.push(`<tr><td style="padding-left:20px;">메모</td><td colspan="2">${escapeHtml(item.madrid.priority.memo)}</td></tr>`);
+    }
+    rows.push(`<tr class="subtotal"><td style="padding-left:20px;">소계 (VAT 제외)</td><td class="num total">${fmtKRW(m.krPriorityAgent + m.krPriorityOfficial)}</td><td>-</td></tr>`);
+  }
+
   // 최종 합계
   rows.push(`<tr><td>공급가액 (VAT 제외)</td><td class="num">${fmtKRW(r.supply)}</td><td>-</td></tr>`);
-  rows.push(`<tr><td>부가세 (VAT)</td><td class="num">${fmtKRW(r.vat)}</td><td>-</td></tr>`);
+  rows.push(`<tr><td>부가세 (VAT)</td><td class="num">${fmtKRW(r.vat)}</td><td>${m.krPriorityEnabled ? '본체 VAT + 우선심사 수행기관 × 10%' : '-'}</td></tr>`);
   rows.push(`<tr class="subtotal"><td><strong>총계 (VAT 포함)</strong></td><td class="num total"><strong>${fmtKRW(r.totalKRW)}</strong></td><td>-</td></tr>`);
 
   return `<table class="fee-table">
