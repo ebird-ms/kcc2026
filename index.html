@@ -7481,14 +7481,19 @@ function renderQuoteTabs() {
   if (pane) pane.classList.remove('is-empty');
 
   const currentVariant = (state.variantLabel || '').trim();
+  // 마지막 1개 탭은 ✕ 버튼 숨김 (보호)
+  const canClose = group.length > 1;
   let html = '';
   group.forEach(g => {
     const isCurrent = currentQuoteKey === g.key;
     const activeCls = isCurrent ? ' active' : '';
+    const closeBtn = canClose
+      ? `<button class="tab-close" data-quote-tab-close-key="${escapeHtml(g.key)}" title="탭 삭제">✕</button>`
+      : '';
     html += `
       <div class="quote-tab${activeCls}" data-quote-tab-key="${escapeHtml(g.key)}" title="클릭: 탭 전환 · 더블클릭: 이름 변경">
         <span class="tab-label" data-quote-tab-label-key="${escapeHtml(g.key)}">${escapeHtml(g.variantLabel)}</span>
-        <button class="tab-close" data-quote-tab-close-key="${escapeHtml(g.key)}" title="탭 삭제">✕</button>
+        ${closeBtn}
       </div>
     `;
   });
@@ -7679,16 +7684,22 @@ async function renameQuoteTab(oldKey, oldLabel, newLabel) {
   }
 }
 
-/* 탭 닫기: 해당 견적 문서 삭제. 마지막 1개도 삭제 가능. */
+/* 탭 닫기: 해당 견적 문서 삭제. 마지막 1개는 보호. */
 async function closeQuoteTab(targetKey) {
   if (!targetKey || !allQuotes[targetKey]) { showToast('견적을 찾을 수 없습니다'); return; }
   const q = allQuotes[targetKey];
   const targetLabel = q.variantLabel || parseQuoteKey(targetKey).variantLabel;
+  const consultant = q.consultantName;
+  const baseName = q.clientBaseName;
+  // 마지막 1개 보호
+  const groupKeys = getQuoteGroupKeys(consultant, baseName);
+  if (groupKeys.length <= 1) {
+    showToast('마지막 탭은 삭제할 수 없습니다');
+    return;
+  }
   if (!confirm(`탭 "${targetLabel}"을(를) 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`)) return;
   if (!window._firebase?.ok) { showToast('Firebase 연결 필요'); return; }
   const fb = window._firebase;
-  const consultant = q.consultantName;
-  const baseName = q.clientBaseName;
 
   // pending 자동 저장 flush (현재 탭을 삭제하는 경우)
   if (_autoSaveTimer && currentQuoteKey === targetKey) {
@@ -8371,7 +8382,7 @@ function renderItem(item, idx) {
     </div>
     <div class="field-actions">
       <button class="icon-btn expand" data-action="toggleExpand"><span class="caret">▾</span></button>
-      ${(state.items.length > 1 && isStaff) ? '<button class="icon-btn danger" data-action="remove">✕</button>' : ''}
+      ${isStaff ? '<button class="icon-btn danger" data-action="remove">✕</button>' : ''}
     </div>
   `;
   wrapper.appendChild(primary);
@@ -9910,6 +9921,7 @@ function renderPatentKRItem(item, idx) {
   const result = calcPatentItem(item);
   const pt = item.patent || createPatentData('KR');
   const mode = item.supportMode || 'support';
+  const isStaff = session?.role === 'admin' || session?.role === 'consultant';
 
   const wrapper = document.createElement('div');
   wrapper.className = 'item patent-item'
@@ -9980,7 +9992,7 @@ function renderPatentKRItem(item, idx) {
     </div>
     <div class="field-actions">
       <button class="icon-btn expand" data-action="toggleExpand"><span class="caret">▾</span></button>
-      <button class="icon-btn danger" data-action="removePatent">✕</button>
+      ${isStaff ? '<button class="icon-btn danger" data-action="removePatent">✕</button>' : ''}
     </div>
   `;
   wrapper.appendChild(primary);
@@ -10028,6 +10040,7 @@ function renderPatentPCTItem(item, idx) {
   const result = calcPatentItem(item);
   const pt = item.patent || createPatentData('PCT');
   const mode = item.supportMode || 'support';
+  const isStaff = session?.role === 'admin' || session?.role === 'consultant';
 
   const wrapper = document.createElement('div');
   wrapper.className = 'item patent-item'
@@ -10089,7 +10102,7 @@ function renderPatentPCTItem(item, idx) {
     </div>
     <div class="field-actions">
       <button class="icon-btn expand" data-action="toggleExpand"><span class="caret">▾</span></button>
-      <button class="icon-btn danger" data-action="removePatent">✕</button>
+      ${isStaff ? '<button class="icon-btn danger" data-action="removePatent">✕</button>' : ''}
     </div>
   `;
   wrapper.appendChild(primary);
@@ -10179,6 +10192,7 @@ function renderPatentIntlItem(item, idx) {
   const pt = item.patent || createPatentData(item.country);
   const mode = item.supportMode || 'support';
   const country = item.country;
+  const isStaff = session?.role === 'admin' || session?.role === 'consultant';
 
   // 프리셋 자동 선택: 없으면 국가 기본 (전역 PATENT_INTL_PRESETS만 참조)
   if (!pt.intlPresetId) {
@@ -10260,7 +10274,7 @@ function renderPatentIntlItem(item, idx) {
     </div>
     <div class="field-actions">
       <button class="icon-btn expand" data-action="toggleExpand"><span class="caret">▾</span></button>
-      <button class="icon-btn danger" data-action="removePatent">✕</button>
+      ${isStaff ? '<button class="icon-btn danger" data-action="removePatent">✕</button>' : ''}
     </div>
   `;
   wrapper.appendChild(primary);
@@ -10444,6 +10458,7 @@ function renderPatentIntlBreakdown(item, r) {
 
 function renderPatentStubItem(item, idx) {
   const pt = item.patent || createPatentData(item.country);
+  const isStaff = session?.role === 'admin' || session?.role === 'consultant';
   const wrapper = document.createElement('div');
   wrapper.className = 'item patent-item mode-' + (item.supportMode || 'support');
   wrapper.dataset.id = item.id;
@@ -10468,7 +10483,7 @@ function renderPatentStubItem(item, idx) {
       </div>
     </div>
     <div class="field-actions">
-      <button class="icon-btn danger" data-action="removePatent">✕</button>
+      ${isStaff ? '<button class="icon-btn danger" data-action="removePatent">✕</button>' : ''}
     </div>
   `;
   wrapper.appendChild(primary);
@@ -10751,7 +10766,7 @@ function renderMadridItem(item, idx) {
     </div>
     <div class="field-actions">
       <button class="icon-btn expand" data-action="toggleExpand"><span class="caret">▾</span></button>
-      ${(state.items.length > 1 && isStaff) ? '<button class="icon-btn danger" data-action="remove">✕</button>' : ''}
+      ${isStaff ? '<button class="icon-btn danger" data-action="remove">✕</button>' : ''}
     </div>
   `;
   wrapper.appendChild(primary);
@@ -10816,7 +10831,7 @@ function renderMadridItem(item, idx) {
           <label style="display:flex;align-items:center;gap:6px;font-weight:500;color:#856404;cursor:pointer;">
             <input type="checkbox" data-madrid-priority-toggle ${pri.enabled ? 'checked' : ''}>
             <span>우선심사 신청</span>
-            <span style="font-size:11px;color:#a07700;font-weight:400;">류당 수행기관 ${fmtNum(MADRID_KR_PRIORITY_AGENT_PER_CLASS)}원 + 관납료 ${fmtNum(MADRID_KR_PRIORITY_OFFICIAL_PER_CLASS)}원</span>
+            <span style="font-size:11px;color:#a07700;font-weight:400;">수행기관 수수료 ${fmtNum(MADRID_KR_PRIORITY_AGENT_PER_CLASS)}원 + 관납료 ${fmtNum(MADRID_KR_PRIORITY_OFFICIAL_PER_CLASS)}원(1개류당)</span>
           </label>
           ${pri.enabled ? `
             <div class="mode-checks" style="display:flex;gap:8px;">
