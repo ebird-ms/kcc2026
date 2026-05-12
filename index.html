@@ -1836,6 +1836,14 @@
   }
   .quote-tab-btn:hover { background: #f5ede0; }
   .quote-tab-btn[disabled] { opacity: 0.4; cursor: not-allowed; }
+  .quote-tab-btn.quote-tab-reset {
+    border-color: #c97070;
+    color: #a14040;
+  }
+  .quote-tab-btn.quote-tab-reset:hover {
+    background: #fbe7e7;
+    border-color: #a14040;
+  }
   .quote-tab-empty {
     flex: 1;
     text-align: center;
@@ -7342,10 +7350,7 @@ function loadQuoteFromKey(key) {
       }))
     }))
   };
-  if (state.items.length === 0) {
-    const firstCountry = Object.keys(CONFIG.countries)[0] || 'KR';
-    state.items = [createItem(firstCountry)];
-  }
+  // v9.15 v2: 빈 견적도 정상 — 자동 카드 추가하지 않음
   // v9.12: 로드된 모든 상표 항목에 대해 출원 프리셋 자동 적용 + 등록 비활성화 강제
   //   - 기존 견적 호환: 이전에 useRegistration이 켜져 있던 항목도 자동으로 비활성화
   //   - 출원 프리셋이 비어 있던 항목은 국가의 첫 출원 프리셋이 자동 적용됨
@@ -7466,15 +7471,19 @@ function renderQuoteTabs() {
 
   const group = getQuoteGroupSorted(consultant, baseName);
 
-  // 그룹 0개: "+ 새 탭" 버튼만 노출
+  // 그룹 0개: "+ 새 탭" + "초기화" 노출
   if (group.length === 0) {
     wrap.innerHTML = `
       <div class="quote-tab-empty">이 기업의 견적 탭이 아직 없습니다.</div>
       <div class="quote-tab-actions">
         <button class="quote-tab-btn" id="addBlankTabBtn" title="빈 견적 탭 추가">+ 새 탭</button>
       </div>
+      <div class="quote-tab-actions" style="margin-left:auto;">
+        <button class="quote-tab-btn quote-tab-reset" id="resetQuoteGroupBtn" title="이 기업의 모든 견적 탭 삭제 후 빈 견적 1개로 초기화">🗑 초기화</button>
+      </div>
     `;
     wrap.querySelector('#addBlankTabBtn').addEventListener('click', () => addNewQuoteTab('blank'));
+    wrap.querySelector('#resetQuoteGroupBtn').addEventListener('click', () => resetCurrentQuoteGroup());
     if (pane) pane.classList.add('is-empty');
     return;
   }
@@ -7501,6 +7510,9 @@ function renderQuoteTabs() {
     <div class="quote-tab-actions">
       <button class="quote-tab-btn" id="duplicateTabBtn" title="현재 탭 바로 오른쪽에 현재 탭 내용 복제">+ 탭 복제</button>
       <button class="quote-tab-btn" id="addBlankTabBtn" title="가장 오른쪽에 빈 견적 탭 추가">+ 새 탭</button>
+    </div>
+    <div class="quote-tab-actions" style="margin-left:auto;">
+      <button class="quote-tab-btn quote-tab-reset" id="resetQuoteGroupBtn" title="이 기업의 모든 견적 탭 삭제 후 빈 견적 1개로 초기화">🗑 초기화</button>
     </div>
   `;
   wrap.innerHTML = html;
@@ -7535,6 +7547,8 @@ function renderQuoteTabs() {
   if (addBlankBtn) addBlankBtn.addEventListener('click', () => addNewQuoteTab('blank'));
   const duplicateBtn = wrap.querySelector('#duplicateTabBtn');
   if (duplicateBtn) duplicateBtn.addEventListener('click', () => addNewQuoteTab('duplicate'));
+  const resetBtn = wrap.querySelector('#resetQuoteGroupBtn');
+  if (resetBtn) resetBtn.addEventListener('click', () => resetCurrentQuoteGroup());
 }
 
 /* 탭 전환: 그룹 내 다른 견적으로 이동
@@ -7731,6 +7745,61 @@ async function closeQuoteTab(targetKey) {
   } catch (err) {
     setSyncStatus('error', '삭제 실패');
     showToast('삭제 실패: ' + err.message);
+  }
+}
+
+/* v9.15 v2: 해당 기업의 모든 견적 탭 초기화
+ * 그룹의 모든 키 삭제 → 빈 견적 1개(견적 1, items=[])로 재시작
+ */
+async function resetCurrentQuoteGroup() {
+  const consultant = (state.consultantName || '').trim();
+  const baseName = (state.clientName || '').trim();
+  const pin = (state.clientPin || '').trim();
+  if (!consultant || !baseName) { showToast('상담자와 기업명을 먼저 입력하세요'); return; }
+  if (!pin) { showToast('기업 4자리 암호를 먼저 입력하세요'); return; }
+  if (!window._firebase?.ok) { showToast('Firebase 연결 필요'); return; }
+
+  const groupKeys = getQuoteGroupKeys(consultant, baseName);
+  const msg = groupKeys.length > 0
+    ? `"${baseName}" 기업의 견적 탭 ${groupKeys.length}개를 모두 삭제하고 빈 견적 하나로 초기화합니다.\n\n이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?`
+    : `"${baseName}" 기업의 빈 견적으로 초기화합니다. 계속하시겠습니까?`;
+  if (!confirm(msg)) return;
+
+  // pending 자동 저장 취소
+  if (_autoSaveTimer) { clearTimeout(_autoSaveTimer); _autoSaveTimer = null; }
+
+  const fb = window._firebase;
+  setSyncStatus('syncing', '초기화 중...');
+  try {
+    // 그룹의 모든 키 삭제
+    for (const k of groupKeys) {
+      try { await fb.deleteDoc(fb.doc(fb.db, COLLECTION_QUOTES, k)); } catch (e) { console.warn(e); }
+    }
+    // 새 빈 견적 생성
+    state = {
+      consultantName: consultant,
+      clientName: baseName,
+      clientPin: pin,
+      companyId: state.companyId,
+      quoteDate: new Date().toISOString().slice(0,10),
+      variantLabel: '견적 1',
+      manualTierOverride: null,
+      _order: 100,
+      items: []
+    };
+    currentQuoteKey = null;
+    _lastSavedHash = null;
+    const ok = await saveCurrentQuote({ silent: true });
+    setSyncStatus('connected', '실시간 동기화');
+    if (ok) {
+      render();
+      showToast(`"${baseName}" 견적이 초기화되었습니다`);
+    } else {
+      showToast('초기화 실패');
+    }
+  } catch (err) {
+    setSyncStatus('error', '초기화 실패');
+    showToast('초기화 실패: ' + err.message);
   }
 }
 
@@ -8219,10 +8288,7 @@ function selectCompany(id) {
     state.clientPin = company.pw || '';
   }
   document.getElementById('companyAutocomplete').classList.remove('active');
-  // 기본 국내 출원 항목 하나 추가 (비어있으면)
-  if (state.items.length === 0) {
-    state.items = [createItem('KR')];
-  }
+  // v9.15 v2: 빈 견적으로 시작 — 사용자가 + 버튼으로 직접 카드 추가
   render();
   showToast(`${id} · ${company.tier} 기업 선택됨`);
 }
@@ -11742,8 +11808,7 @@ function renderClientList() {
         currentQuoteKey = null;
         state = createEmptyState();
         state.consultantName = session.clientName;
-        const firstCountry = Object.keys(CONFIG.countries)[0] || 'KR';
-        state.items = [createItem(firstCountry)];
+        // v9.15 v2: 빈 견적으로 시작 — 자동 카드 추가하지 않음
         render();
       }
       closeModal('clientListModal');
@@ -14970,8 +15035,7 @@ function openQuoteForEduCompany(companyId) {
     state.companyId = c.id;
     state.clientPin = c.pw || '';      // 해당 기업 패스워드 자동 설정
     state.items = [];
-    // 기본 국내 출원 항목 하나 자동 추가
-    state.items = [createItem('KR')];
+    // v9.15 v2: 빈 견적으로 시작 — 자동 카드 추가하지 않음
     render();
   }
 }
