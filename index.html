@@ -1749,22 +1749,22 @@
   }
   .company-quick-info.active { display: block; }
 
-  /* ===== v9.15: 견적 탭 (variant) ===== */
+  /* ===== v9.15 v2: 견적 탭 + 콘텐츠 박스 ===== */
   .quote-tabs {
     display: flex;
-    align-items: stretch;
+    align-items: flex-end;
     gap: 2px;
-    margin: 8px 0 0;
-    border-bottom: 2px solid #d4a44a;
+    margin: 12px 0 0;
     flex-wrap: wrap;
     min-height: 36px;
+    padding: 0 4px;
   }
   .quote-tab {
     position: relative;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 12px 6px 14px;
+    padding: 6px 12px 7px 14px;
     background: #f5ede0;
     border: 1px solid #d4a44a;
     border-bottom: none;
@@ -1776,15 +1776,18 @@
     user-select: none;
     transition: background 0.12s, color 0.12s;
     max-width: 220px;
+    margin-bottom: -1px;
   }
   .quote-tab:hover { background: #ebe0cd; }
   .quote-tab.active {
-    background: #d4a44a;
-    color: #fff;
+    background: #fff;
+    color: #6a4a1c;
     cursor: default;
-    z-index: 1;
+    z-index: 2;
+    border-bottom: 1px solid #fff;
+    font-weight: 600;
   }
-  .quote-tab.active:hover { background: #d4a44a; }
+  .quote-tab.active:hover { background: #fff; }
   .quote-tab .tab-label {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1792,7 +1795,7 @@
     max-width: 160px;
   }
   .quote-tab .tab-label-input {
-    border: 1px solid #fff;
+    border: 1px solid #d4a44a;
     background: #fff;
     color: #6a4a1c;
     font-size: 13px;
@@ -1809,42 +1812,71 @@
     font-size: 14px;
     line-height: 1;
     cursor: pointer;
-    opacity: 0.6;
+    opacity: 0.5;
     padding: 0 2px;
     margin-left: 2px;
   }
-  .quote-tab .tab-close:hover { opacity: 1; }
-  .quote-tab.unsaved::after {
-    content: '●';
-    color: #d97706;
-    font-size: 10px;
-    margin-left: 4px;
-    line-height: 1;
-  }
+  .quote-tab .tab-close:hover { opacity: 1; color: #b32d2d; }
   .quote-tab-actions {
     display: inline-flex;
     align-items: center;
     gap: 4px;
     margin-left: 6px;
+    align-self: center;
   }
   .quote-tab-btn {
     background: transparent;
     border: 1px dashed #d4a44a;
     color: #6a4a1c;
     font-size: 12px;
-    padding: 4px 10px;
+    padding: 5px 10px;
     border-radius: 4px;
     cursor: pointer;
     transition: background 0.12s;
   }
   .quote-tab-btn:hover { background: #f5ede0; }
   .quote-tab-btn[disabled] { opacity: 0.4; cursor: not-allowed; }
-  .quote-tab-hint {
+  .quote-tab-empty {
+    flex: 1;
+    text-align: center;
+    padding: 8px;
+    color: var(--ink-muted);
+    font-size: 13px;
+    background: #faf5e8;
+    border: 1px dashed #d4a44a;
+    border-radius: 4px;
+    margin-right: 6px;
+  }
+  .quote-tab-pane {
+    background: #fff;
+    border: 2px solid #d4a44a;
+    border-radius: 0 6px 6px 6px;
+    padding: 16px;
+    margin-bottom: 20px;
+    position: relative;
+    z-index: 1;
+  }
+  .quote-tab-pane.is-empty {
+    min-height: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ink-muted);
+    font-size: 13px;
+  }
+
+  /* 자동 저장 상태 인디케이터 */
+  .autosave-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     font-size: 11px;
     color: var(--ink-muted);
-    margin-left: auto;
-    align-self: center;
+    margin-left: 8px;
   }
+  .autosave-indicator.saving { color: #d97706; }
+  .autosave-indicator.saved { color: #3a7d4a; }
+  .autosave-indicator.error { color: #b32d2d; }
 
   /* ===== 지원금 패널 ===== */
   .support-panel {
@@ -3701,7 +3733,8 @@
         <button class="pill-btn admin-only" id="consultantBtn">👥 상담자 관리</button>
       </div>
       <div class="topbar-right">
-        <button class="pill-btn primary staff-only" id="saveBtn">💾 저장 (클라우드)</button>
+        <button class="pill-btn primary staff-only" id="saveBtn" title="자동 저장이 동작 중이지만, 즉시 저장하려면 클릭">💾 지금 저장</button>
+        <span class="autosave-indicator staff-only" id="autoSaveIndicator"></span>
         <button class="pill-btn" id="logoutBtn">로그아웃</button>
       </div>
     </div>
@@ -3742,8 +3775,9 @@
       </div>
     </div>
 
-    <!-- v9.15: 견적 탭 (한 기업 아래 여러 시나리오) -->
+    <!-- v9.15 v2: 견적 탭 + 탭 콘텐츠 박스 (지원금/환율/카드/합계 전체를 한 박스로 묶음) -->
     <div class="quote-tabs staff-only" id="quoteTabs" style="display:none;"></div>
+    <div class="quote-tab-pane" id="quoteTabPane">
 
     <!-- 지원금 패널 (엑셀 기업이거나 수동 유형 선택 시 표시) -->
     <div class="support-panel" id="supportPanel" style="display:none;">
@@ -3870,6 +3904,8 @@
       <div class="note-title">산정 기준</div>
       <div id="notesContent"></div>
     </div>
+
+    </div><!-- /.quote-tab-pane -->
 
   </div>
 </div>
@@ -5668,32 +5704,34 @@ function createEmptyState() {
     companyId: '',  // 엑셀 기업 ID (설정되면 tier/지원금 자동 연결)
     quoteDate: new Date().toISOString().slice(0,10),
     items: [],
-    // v9.15: 견적 탭 (한 기업 아래 여러 시나리오)
-    variantLabel: '기본'
+    // v9.15 v2: 견적 탭 (한 기업 아래 여러 시나리오) — '기본' 특수취급 없음
+    variantLabel: '견적 1',
+    manualTierOverride: null,
+    _order: null  // 새로 저장할 때 적용
   };
 }
 
-/* ===== v9.15: 견적 탭 (variant) 키 헬퍼 =====
- * - 기본 탭(variantLabel === '기본'): 키는 기존과 동일 `${consultant}_${base}` (역호환)
- * - 그 외 variant: `${consultant}_${base}::${variantLabel}` (구분자 ::로 충돌 회피)
- * - parseQuoteKey: 키에서 (consultant, base, variantLabel) 추출
- * - getQuoteGroupKeys: 같은 (consultant, base) 그룹의 모든 키 반환
+/* ===== v9.15: 견적 탭 (variant) 키 헬퍼 (재설계 v2) =====
+ * - 모든 키는 3단: `${consultant}_${base}::${variantLabel}` ('기본' 특수 취급 없음)
+ * - 기본 자동 라벨: 견적 1, 견적 2, ...
+ * - parseQuoteKey: 3단·2단 모두 안전하게 파싱 (2단은 마이그레이션 전 호환)
+ * - 정렬: q.order 우선, 그 다음 createdAt
  */
 function buildQuoteKey(consultantName, baseName, variantLabel) {
-  const v = (variantLabel || '기본').trim();
-  if (!v || v === '기본') return `${consultantName}_${baseName}`;
+  const v = (variantLabel || '견적 1').trim() || '견적 1';
   return `${consultantName}_${baseName}::${v}`;
 }
 
 function parseQuoteKey(key) {
   const sepIdx = key.indexOf('::');
   if (sepIdx === -1) {
+    // 2단 키 (마이그레이션 전) — '견적 1'로 매핑
     const idx = key.indexOf('_');
-    if (idx === -1) return { consultantName: '', baseName: key, variantLabel: '기본' };
+    if (idx === -1) return { consultantName: '', baseName: key, variantLabel: '견적 1' };
     return {
       consultantName: key.slice(0, idx),
       baseName: key.slice(idx + 1),
-      variantLabel: '기본'
+      variantLabel: '견적 1'
     };
   }
   const head = key.slice(0, sepIdx);
@@ -5716,8 +5754,9 @@ function getQuoteGroupSorted(consultantName, baseName) {
   return getQuoteGroupKeys(consultantName, baseName)
     .map(k => ({ key: k, ...parseQuoteKey(k), quote: allQuotes[k] }))
     .sort((a, b) => {
-      if (a.variantLabel === '기본') return -1;
-      if (b.variantLabel === '기본') return 1;
+      const oa = (a.quote?.order ?? null);
+      const ob = (b.quote?.order ?? null);
+      if (oa != null && ob != null && oa !== ob) return oa - ob;
       const ta = a.quote?.createdAt || a.quote?.updatedAt || '';
       const tb = b.quote?.createdAt || b.quote?.updatedAt || '';
       return ta < tb ? -1 : ta > tb ? 1 : 0;
@@ -5728,9 +5767,25 @@ function getNextVariantLabel(consultantName, baseName) {
   const used = new Set(
     getQuoteGroupKeys(consultantName, baseName).map(k => parseQuoteKey(k).variantLabel)
   );
-  let n = 2;
+  let n = 1;
   while (used.has(`견적 ${n}`)) n++;
   return `견적 ${n}`;
+}
+
+/* 새 탭 order 산출
+ * - duplicate: 현재 탭과 다음 탭 order 사이 (없으면 +100)
+ * - 그 외(append): 마지막 order + 100
+ */
+function computeNewTabOrder(group, mode, currentKey) {
+  if (group.length === 0) return 100;
+  if (mode === 'duplicate' && currentKey) {
+    const idx = group.findIndex(g => g.key === currentKey);
+    if (idx === -1) return (group[group.length - 1].quote?.order ?? 100) + 100;
+    const cur = group[idx].quote?.order ?? (idx + 1) * 100;
+    const next = idx + 1 < group.length ? (group[idx + 1].quote?.order ?? cur + 200) : null;
+    return next != null ? (cur + next) / 2 : cur + 100;
+  }
+  return (group[group.length - 1].quote?.order ?? 100) + 100;
 }
 
 function createItem(country='KR', type='trademark') {
@@ -6988,21 +7043,29 @@ async function saveFxRates() {
   } catch (e) { return false; }
 }
 
-async function saveCurrentQuote() {
-  if (!window._firebase?.ok) { showToast('Firebase 설정 필요'); return false; }
+async function saveCurrentQuote(opts) {
+  opts = opts || {};
+  const silent = !!opts.silent;
+  if (!window._firebase?.ok) { if (!silent) showToast('Firebase 설정 필요'); return false; }
   if (!state.clientName.trim()) {
-    showToast('고객명을 입력해 주세요');
-    document.getElementById('clientName').focus();
+    if (!silent) {
+      showToast('고객명을 입력해 주세요');
+      document.getElementById('clientName').focus();
+    }
     return false;
   }
   if (!state.consultantName.trim()) {
-    showToast('상담자명을 입력해 주세요');
-    document.getElementById('consultantName').focus();
+    if (!silent) {
+      showToast('상담자명을 입력해 주세요');
+      document.getElementById('consultantName').focus();
+    }
     return false;
   }
   if (!state.clientPin.trim()) {
-    showToast('고객 4자리 암호를 입력해 주세요');
-    document.getElementById('clientPin').focus();
+    if (!silent) {
+      showToast('고객 4자리 암호를 입력해 주세요');
+      document.getElementById('clientPin').focus();
+    }
     return false;
   }
 
@@ -7031,6 +7094,11 @@ async function saveCurrentQuote() {
 
   // v9.15: 수동 tier 오버라이드(우수기업 시나리오 등)는 견적 단위로 저장
   const manualTierOverride = state.manualTierOverride || null;
+  // v9.15 v2: order(탭 순서) + createdAt(이력)
+  const newOrder = (state._order != null)
+    ? state._order
+    : (existingDoc?.order ?? Date.now() / 1000);
+  const createdAt = existingDoc?.createdAt || new Date().toISOString();
   const docData = {
     pin: state.clientPin.trim(),
     quoteDate: state.quoteDate,
@@ -7040,6 +7108,8 @@ async function saveCurrentQuote() {
     companyId: state.companyId || '',
     variantLabel: variantLabel,             // v9.15: 탭 라벨
     manualTierOverride: manualTierOverride,  // v9.15: 견적별 tier 오버라이드 (null=기업 기본값)
+    order: newOrder,                          // v9.15 v2: 탭 순서
+    createdAt: createdAt,                     // v9.15 v2: 최초 생성 시각
     consultantHistory: history,
     items: state.items.map(it => ({
       type: it.type || 'trademark',  // v8.21~ (이전 데이터는 'trademark'로 자동 처리)
@@ -7062,21 +7132,71 @@ async function saveCurrentQuote() {
     updatedAt: new Date().toISOString()
   };
 
-  setSyncStatus('syncing', '저장 중...');
+  setSyncStatus('syncing', silent ? '자동 저장 중...' : '저장 중...');
+  setAutoSaveIndicator('saving');
   try {
     if (oldKey && oldKey !== newKey) {
       await fb.deleteDoc(fb.doc(fb.db, COLLECTION_QUOTES, oldKey));
     }
     await fb.setDoc(fb.doc(fb.db, COLLECTION_QUOTES, newKey), docData);
     currentQuoteKey = newKey;
+    state._order = newOrder;  // 다음 저장에 재사용
     setSyncStatus('connected', '실시간 동기화');
-    showToast(`"${baseName}" 견적이 저장되었습니다`);
+    setAutoSaveIndicator('saved');
+    _lastSavedHash = computeStateHash();
+    if (!silent) showToast(`"${baseName}" 견적이 저장되었습니다`);
     return true;
   } catch (err) {
     setSyncStatus('error', '저장 실패');
-    showToast('저장 실패: ' + err.message);
+    setAutoSaveIndicator('error');
+    if (!silent) showToast('저장 실패: ' + err.message);
     return false;
   }
+}
+
+/* ===== v9.15 v2: 자동 저장 (debounce 800ms) =====
+ * - 사용자가 입력하면 800ms idle 후 자동으로 saveCurrentQuote({silent:true}) 호출
+ * - 같은 state 해시면 skip (불필요 호출 방지)
+ * - 로드 직후엔 hash가 갱신되어 자동 저장이 즉시 트리거되지 않음
+ */
+let _autoSaveTimer = null;
+let _lastSavedHash = null;
+
+function computeStateHash() {
+  try {
+    return JSON.stringify({
+      c: state.consultantName, b: state.clientName, p: state.clientPin,
+      id: state.companyId, d: state.quoteDate,
+      v: state.variantLabel, mt: state.manualTierOverride,
+      it: state.items
+    });
+  } catch (e) { return ''; }
+}
+
+function setAutoSaveIndicator(s) {
+  const el = document.getElementById('autoSaveIndicator');
+  if (!el) return;
+  el.className = 'autosave-indicator ' + (s || '');
+  if (s === 'saving') el.textContent = '● 저장 중';
+  else if (s === 'saved') el.textContent = '✓ 저장됨';
+  else if (s === 'error') el.textContent = '⚠ 저장 실패';
+  else el.textContent = '';
+}
+
+function scheduleAutoSave() {
+  // 저장 조건: staff 세션 + 필수 입력 완료
+  if (session?.role !== 'admin' && session?.role !== 'consultant') return;
+  if (!state.consultantName?.trim() || !state.clientName?.trim() || !state.clientPin?.trim()) return;
+
+  const h = computeStateHash();
+  if (h === _lastSavedHash) return;  // 변경 없음
+
+  if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
+  setAutoSaveIndicator('saving');
+  _autoSaveTimer = setTimeout(async () => {
+    _autoSaveTimer = null;
+    await saveCurrentQuote({ silent: true });
+  }, 800);
 }
 
 async function deleteQuote(key) {
@@ -7135,6 +7255,11 @@ function enterApp() {
   const badgeText = document.getElementById('userBadgeText');
   document.body.classList.remove('is-admin', 'is-consultant');
 
+  // v9.15 v2: staff 진입 시 2단 키 마이그레이션 (1회만)
+  if (session?.role === 'admin' || session?.role === 'consultant') {
+    migrateQuoteKeys().catch(e => console.warn(e));
+  }
+
   if (session.role === 'admin') {
     document.body.classList.add('is-admin');
     badge.className = 'user-badge admin';
@@ -7168,8 +7293,8 @@ function loadQuoteFromKey(key) {
   if (!q) return;
   currentQuoteKey = key;
   const parsed = parseQuoteKey(key);
-  // v9.15: 문서에 variantLabel이 있으면 우선, 없으면 키에서 파싱한 값 사용
-  const variantLabel = q.variantLabel || parsed.variantLabel || '기본';
+  // v9.15 v2: '기본' 특수취급 제거 → 모든 라벨은 일반 라벨 (디폴트 '견적 1')
+  const variantLabel = q.variantLabel || parsed.variantLabel || '견적 1';
   state = {
     consultantName: q.consultantName || '',
     clientName: q.clientBaseName || parsed.baseName || key,
@@ -7178,6 +7303,7 @@ function loadQuoteFromKey(key) {
     quoteDate: q.quoteDate || new Date().toISOString().slice(0,10),
     variantLabel: variantLabel,
     manualTierOverride: q.manualTierOverride || null,
+    _order: q.order ?? null,
     items: (q.items || []).map(it => ({
       id: ++itemIdSeq,
       type: it.type || 'trademark',  // v8.21~ 호환: 이전 데이터는 'trademark'로 자동 처리
@@ -7233,6 +7359,9 @@ function loadQuoteFromKey(key) {
       }
     }
   });
+  // v9.15 v2: 로드 직후엔 자동 저장이 즉시 트리거되지 않도록 hash 갱신
+  _lastSavedHash = computeStateHash();
+  setAutoSaveIndicator('saved');
 }
 
 /* ===== 렌더 ===== */
@@ -7243,11 +7372,12 @@ function render() {
 
   const sub = document.getElementById('appSubtitle');
   if (session?.role === 'admin' || session?.role === 'consultant') {
-    // v9.15: 탭 라벨 함께 표시
-    const vl = (state.variantLabel || '기본').trim() || '기본';
+    // v9.15 v2: 탭 라벨 함께 표시 (특수취급 없음)
+    const vl = (state.variantLabel || '').trim();
+    const tabSuffix = vl ? ` [${vl}]` : '';
     sub.textContent = currentQuoteKey
-      ? `편집 중: ${state.consultantName}_${state.clientName}${vl !== '기본' ? ' [' + vl + ']' : ''}`
-      : `새 견적 작성${vl !== '기본' ? ' [' + vl + ']' : ''}`;
+      ? `편집 중: ${state.consultantName}_${state.clientName}${tabSuffix}`
+      : (state.clientName ? `새 견적 작성${tabSuffix}` : '새 견적 작성');
   } else if (session?.role === 'client') {
     sub.textContent = `작성일 ${state.quoteDate || '-'} · 담당: ${state.consultantName || '-'}`;
   } else {
@@ -7303,18 +7433,23 @@ function render() {
   renderSummary();
   renderNotes();
   applyReadOnlyUI();
+  // v9.15 v2: 자동 저장 예약 (debounce 800ms, 변경 없으면 skip)
+  scheduleAutoSave();
 }
 
-/* ===== v9.15: 견적 탭 렌더 + 동작 =====
- * 같은 (consultantName, baseName) 그룹 안의 모든 견적(variant)을 탭으로 표시.
- * - 기본 탭(variantLabel === '기본')은 항상 첫 위치, 항상 표시
- * - 탭 클릭 → loadQuoteFromKey
- * - 탭 라벨 더블클릭 → 인라인 편집
- * - "+ 새 탭" 빈 견적 / "현재 탭 복제"
- * - 탭이 1개면 삭제 버튼 숨김
+/* ===== v9.15 v2: 견적 탭 렌더 + 동작 (재설계) =====
+ * - 모든 라벨은 일반 라벨 ('기본' 특수취급 없음). 자동 라벨: 견적 1, 견적 2, ...
+ * - 탭 정렬: q.order 우선 (없으면 createdAt)
+ * - 그룹 0개: "+ 새 탭" 버튼만 노출, 탭 박스는 빈 상태로 표시
+ * - 그룹 1개 이상: 탭들 + "+ 탭 복제" + "+ 새 탭"
+ * - "+ 탭 복제" → 현재 탭의 바로 오른쪽에 삽입 (order 중간값)
+ * - "+ 새 탭" → 그룹 가장 오른쪽 (order = max + 100)
+ * - 마지막 탭도 삭제 가능 (보호 없음)
+ * - 탭 추가/삭제는 즉시 Firestore 반영 (자동 저장과 별개)
  */
 function renderQuoteTabs() {
   const wrap = document.getElementById('quoteTabs');
+  const pane = document.getElementById('quoteTabPane');
   if (!wrap) return;
   const isStaff = session?.role === 'admin' || session?.role === 'consultant';
   const consultant = (state.consultantName || '').trim();
@@ -7324,162 +7459,167 @@ function renderQuoteTabs() {
   if (!isStaff || !consultant || !baseName) {
     wrap.style.display = 'none';
     wrap.innerHTML = '';
+    if (pane) pane.classList.remove('is-empty');
     return;
   }
   wrap.style.display = 'flex';
 
-  // 같은 그룹의 견적들 + 현재 작성 중(아직 미저장)인 견적까지 포함
   const group = getQuoteGroupSorted(consultant, baseName);
-  const currentVariant = (state.variantLabel || '기본').trim() || '기본';
-  const hasCurrentInGroup = group.some(g => g.variantLabel === currentVariant);
 
-  // 미저장 임시 항목 추가 (현재 탭이 그룹에 없으면)
-  const tabs = group.map(g => ({
-    variantLabel: g.variantLabel,
-    key: g.key,
-    saved: true,
-    isCurrent: g.variantLabel === currentVariant && currentQuoteKey === g.key
-  }));
-  if (!hasCurrentInGroup) {
-    tabs.push({
-      variantLabel: currentVariant,
-      key: null,
-      saved: false,
-      isCurrent: true
-    });
-    // 정렬: '기본'을 맨 앞으로
-    tabs.sort((a, b) => {
-      if (a.variantLabel === '기본') return -1;
-      if (b.variantLabel === '기본') return 1;
-      return 0;
-    });
+  // 그룹 0개: "+ 새 탭" 버튼만 노출
+  if (group.length === 0) {
+    wrap.innerHTML = `
+      <div class="quote-tab-empty">이 기업의 견적 탭이 아직 없습니다.</div>
+      <div class="quote-tab-actions">
+        <button class="quote-tab-btn" id="addBlankTabBtn" title="빈 견적 탭 추가">+ 새 탭</button>
+      </div>
+    `;
+    wrap.querySelector('#addBlankTabBtn').addEventListener('click', () => addNewQuoteTab('blank'));
+    if (pane) pane.classList.add('is-empty');
+    return;
   }
+  if (pane) pane.classList.remove('is-empty');
 
-  const canDelete = tabs.length > 1;
-
+  const currentVariant = (state.variantLabel || '').trim();
   let html = '';
-  tabs.forEach(t => {
-    const activeCls = t.isCurrent ? ' active' : '';
-    const unsavedCls = !t.saved ? ' unsaved' : '';
-    const closeBtn = (canDelete && t.saved) ? `<button class="tab-close" data-quote-tab-close="${escapeHtml(t.variantLabel)}" title="탭 삭제">✕</button>` : '';
+  group.forEach(g => {
+    const isCurrent = currentQuoteKey === g.key;
+    const activeCls = isCurrent ? ' active' : '';
     html += `
-      <div class="quote-tab${activeCls}${unsavedCls}" data-quote-tab="${escapeHtml(t.variantLabel)}" title="${t.saved ? '클릭: 탭 전환 · 더블클릭: 이름 변경' : '미저장 견적'}">
-        <span class="tab-label" data-quote-tab-label="${escapeHtml(t.variantLabel)}">${escapeHtml(t.variantLabel)}</span>
-        ${closeBtn}
+      <div class="quote-tab${activeCls}" data-quote-tab-key="${escapeHtml(g.key)}" title="클릭: 탭 전환 · 더블클릭: 이름 변경">
+        <span class="tab-label" data-quote-tab-label-key="${escapeHtml(g.key)}">${escapeHtml(g.variantLabel)}</span>
+        <button class="tab-close" data-quote-tab-close-key="${escapeHtml(g.key)}" title="탭 삭제">✕</button>
       </div>
     `;
   });
   html += `
     <div class="quote-tab-actions">
-      <button class="quote-tab-btn" id="addBlankTabBtn" title="현재 기업에 빈 견적 탭 추가">+ 새 탭</button>
-      <button class="quote-tab-btn" id="duplicateTabBtn" title="현재 탭 내용을 복제해서 새 탭으로 추가">현재 탭 복제</button>
+      <button class="quote-tab-btn" id="duplicateTabBtn" title="현재 탭 바로 오른쪽에 현재 탭 내용 복제">+ 탭 복제</button>
+      <button class="quote-tab-btn" id="addBlankTabBtn" title="가장 오른쪽에 빈 견적 탭 추가">+ 새 탭</button>
     </div>
-    <span class="quote-tab-hint">탭 이름 더블클릭으로 변경</span>
   `;
   wrap.innerHTML = html;
 
-  // 탭 클릭 (저장된 탭만 전환)
-  wrap.querySelectorAll('[data-quote-tab]').forEach(el => {
+  // 탭 클릭 (전환)
+  wrap.querySelectorAll('[data-quote-tab-key]').forEach(el => {
     el.addEventListener('click', (e) => {
       if (e.target.closest('.tab-close')) return;
       if (e.target.closest('.tab-label-input')) return;
-      const label = el.dataset.quoteTab;
-      if (label === currentVariant) return;
-      switchToQuoteTab(label);
+      const key = el.dataset.quoteTabKey;
+      if (key === currentQuoteKey) return;
+      switchToQuoteTab(key);
     });
   });
   // 탭 라벨 더블클릭 → 인라인 편집
-  wrap.querySelectorAll('[data-quote-tab-label]').forEach(el => {
+  wrap.querySelectorAll('[data-quote-tab-label-key]').forEach(el => {
     el.addEventListener('dblclick', (e) => {
       e.stopPropagation();
-      startTabLabelEdit(el);
+      const key = el.dataset.quoteTabLabelKey;
+      startTabLabelEdit(el, key);
     });
   });
   // 탭 삭제
-  wrap.querySelectorAll('[data-quote-tab-close]').forEach(el => {
+  wrap.querySelectorAll('[data-quote-tab-close-key]').forEach(el => {
     el.addEventListener('click', (e) => {
       e.stopPropagation();
-      const label = el.dataset.quoteTabClose;
-      closeQuoteTab(label);
+      const key = el.dataset.quoteTabCloseKey;
+      closeQuoteTab(key);
     });
   });
-  // 새 탭 추가 (빈)
   const addBlankBtn = wrap.querySelector('#addBlankTabBtn');
-  if (addBlankBtn) addBlankBtn.addEventListener('click', () => addNewQuoteTab(false));
+  if (addBlankBtn) addBlankBtn.addEventListener('click', () => addNewQuoteTab('blank'));
   const duplicateBtn = wrap.querySelector('#duplicateTabBtn');
-  if (duplicateBtn) duplicateBtn.addEventListener('click', () => addNewQuoteTab(true));
+  if (duplicateBtn) duplicateBtn.addEventListener('click', () => addNewQuoteTab('duplicate'));
 }
 
-/* 탭 전환: 그룹 내 다른 라벨의 견적으로 이동
- * 현재 탭이 미저장 상태(currentQuoteKey === null)면 데이터 손실 경고 */
-function switchToQuoteTab(targetLabel) {
-  const consultant = (state.consultantName || '').trim();
-  const baseName = (state.clientName || '').trim();
-  if (!consultant || !baseName) return;
-  const targetKey = buildQuoteKey(consultant, baseName, targetLabel);
-  if (!allQuotes[targetKey]) {
+/* 탭 전환: 그룹 내 다른 견적으로 이동
+ * 자동 저장이 적용되므로 미저장 경고 불필요. 단 pending 자동 저장은 즉시 flush. */
+async function switchToQuoteTab(targetKey) {
+  if (!targetKey || !allQuotes[targetKey]) {
     showToast('해당 탭의 견적을 찾을 수 없습니다');
     return;
   }
-  if (!currentQuoteKey && state.items && state.items.length > 0) {
-    if (!confirm('현재 탭은 아직 저장되지 않았습니다. 다른 탭으로 전환하면 변경사항이 사라집니다. 계속하시겠습니까?')) {
-      return;
-    }
+  // pending 자동 저장이 있으면 먼저 flush
+  if (_autoSaveTimer) {
+    clearTimeout(_autoSaveTimer);
+    _autoSaveTimer = null;
+    await saveCurrentQuote({ silent: true });
   }
   loadQuoteFromKey(targetKey);
   render();
 }
 
-/* 새 탭 추가: duplicate=true면 현재 탭 items/manualTier 복제, false면 빈 견적 */
-function addNewQuoteTab(duplicate) {
+/* 새 탭 추가
+ * mode: 'duplicate' = 현재 탭 바로 오른쪽에 현재 탭 내용 복제
+ *       'blank'     = 그룹 가장 오른쪽에 빈 견적
+ * 즉시 Firestore에 저장 (자동 저장과 별개)
+ */
+async function addNewQuoteTab(mode) {
+  if (!window._firebase?.ok) { showToast('Firebase 연결 필요'); return; }
   const consultant = (state.consultantName || '').trim();
   const baseName = (state.clientName || '').trim();
+  const pin = (state.clientPin || '').trim();
   if (!consultant || !baseName) {
     showToast('상담자와 기업명을 먼저 입력하세요');
     return;
   }
+  if (!pin) {
+    showToast('기업 4자리 암호를 먼저 입력하세요');
+    document.getElementById('clientPin').focus();
+    return;
+  }
+
+  // pending 자동 저장 flush
+  if (_autoSaveTimer) {
+    clearTimeout(_autoSaveTimer);
+    _autoSaveTimer = null;
+    await saveCurrentQuote({ silent: true });
+  }
+
+  const group = getQuoteGroupSorted(consultant, baseName);
   const newLabel = getNextVariantLabel(consultant, baseName);
-  // 새 견적 state 구성 — 기존 기업 정보는 유지, items는 옵션
-  const baseInfo = {
-    consultantName: state.consultantName,
-    clientName: state.clientName,
-    clientPin: state.clientPin,
-    companyId: state.companyId,
-    quoteDate: new Date().toISOString().slice(0,10),
-    variantLabel: newLabel,
-    manualTierOverride: duplicate ? (state.manualTierOverride || null) : null,
-  };
-  if (duplicate) {
-    // items 깊은 복사 (id 새로 발급)
-    state = {
-      ...baseInfo,
-      items: state.items.map(it => ({
+  const newOrder = computeNewTabOrder(group, mode, currentQuoteKey);
+
+  // 새 state 구성
+  const newItems = (mode === 'duplicate' && state.items)
+    ? state.items.map(it => ({
         ...JSON.parse(JSON.stringify(it)),
         id: ++itemIdSeq
       }))
-    };
+    : [];
+
+  state = {
+    consultantName: consultant,
+    clientName: baseName,
+    clientPin: pin,
+    companyId: state.companyId,
+    quoteDate: new Date().toISOString().slice(0,10),
+    variantLabel: newLabel,
+    manualTierOverride: (mode === 'duplicate') ? (state.manualTierOverride || null) : null,
+    _order: newOrder,
+    items: newItems
+  };
+  currentQuoteKey = null;  // 새 탭 — saveCurrentQuote가 키 생성
+  _lastSavedHash = null;   // 강제 저장 유도
+
+  // 즉시 저장
+  const ok = await saveCurrentQuote({ silent: true });
+  if (ok) {
+    render();
+    showToast(`새 탭 "${newLabel}" 생성됨`);
   } else {
-    state = { ...baseInfo, items: [] };
+    showToast('새 탭 생성 실패');
   }
-  currentQuoteKey = null;  // 새 탭은 저장 전까지 미저장
-  render();
-  showToast(`새 탭 "${newLabel}" 생성됨 — 저장 버튼 눌러야 다른 탭으로 전환 가능`);
 }
 
 /* 탭 라벨 인라인 편집 시작 */
-function startTabLabelEdit(labelEl) {
-  const oldLabel = labelEl.dataset.quoteTabLabel;
-  if (oldLabel === '기본') {
-    showToast('"기본" 탭의 이름은 변경할 수 없습니다');
-    return;
-  }
-  const consultant = (state.consultantName || '').trim();
-  const baseName = (state.clientName || '').trim();
-  const oldKey = buildQuoteKey(consultant, baseName, oldLabel);
-  if (!allQuotes[oldKey]) {
-    showToast('미저장 탭은 이름을 변경할 수 없습니다. 먼저 저장하세요.');
-    return;
-  }
+function startTabLabelEdit(labelEl, oldKey) {
+  const q = allQuotes[oldKey];
+  if (!q) { showToast('견적을 찾을 수 없습니다'); return; }
+  const oldLabel = q.variantLabel || parseQuoteKey(oldKey).variantLabel;
+  const consultant = q.consultantName;
+  const baseName = q.clientBaseName;
+
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'tab-label-input';
@@ -7494,11 +7634,9 @@ function startTabLabelEdit(labelEl) {
     committed = true;
     const newLabel = input.value.trim();
     if (!newLabel || newLabel === oldLabel) { render(); return; }
-    if (newLabel === '기본') { showToast('"기본"으로는 변경할 수 없습니다'); render(); return; }
     // 중복 검사
-    const group = getQuoteGroupKeys(consultant, baseName);
     const newKey = buildQuoteKey(consultant, baseName, newLabel);
-    if (group.includes(newKey) && newKey !== oldKey) {
+    if (allQuotes[newKey] && newKey !== oldKey) {
       showToast(`"${newLabel}"이라는 이름의 탭이 이미 있습니다`);
       render();
       return;
@@ -7531,6 +7669,7 @@ async function renameQuoteTab(oldKey, oldLabel, newLabel) {
     if (currentQuoteKey === oldKey) {
       currentQuoteKey = newKey;
       state.variantLabel = newLabel;
+      _lastSavedHash = computeStateHash();
     }
     showToast(`탭 이름이 "${newLabel}"(으)로 변경되었습니다`);
     render();
@@ -7540,29 +7679,40 @@ async function renameQuoteTab(oldKey, oldLabel, newLabel) {
   }
 }
 
-/* 탭 닫기: 해당 견적 문서 삭제. 마지막 1개는 보호. */
-async function closeQuoteTab(targetLabel) {
-  const consultant = (state.consultantName || '').trim();
-  const baseName = (state.clientName || '').trim();
-  const targetKey = buildQuoteKey(consultant, baseName, targetLabel);
-  const group = getQuoteGroupKeys(consultant, baseName);
-  if (group.length <= 1) {
-    showToast('마지막 탭은 삭제할 수 없습니다');
-    return;
-  }
-  if (!allQuotes[targetKey]) { showToast('미저장 탭은 닫기로 삭제할 수 없습니다'); return; }
+/* 탭 닫기: 해당 견적 문서 삭제. 마지막 1개도 삭제 가능. */
+async function closeQuoteTab(targetKey) {
+  if (!targetKey || !allQuotes[targetKey]) { showToast('견적을 찾을 수 없습니다'); return; }
+  const q = allQuotes[targetKey];
+  const targetLabel = q.variantLabel || parseQuoteKey(targetKey).variantLabel;
   if (!confirm(`탭 "${targetLabel}"을(를) 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`)) return;
   if (!window._firebase?.ok) { showToast('Firebase 연결 필요'); return; }
   const fb = window._firebase;
+  const consultant = q.consultantName;
+  const baseName = q.clientBaseName;
+
+  // pending 자동 저장 flush (현재 탭을 삭제하는 경우)
+  if (_autoSaveTimer && currentQuoteKey === targetKey) {
+    clearTimeout(_autoSaveTimer);
+    _autoSaveTimer = null;
+  }
+
   setSyncStatus('syncing', '삭제 중...');
   try {
     await fb.deleteDoc(fb.doc(fb.db, COLLECTION_QUOTES, targetKey));
     setSyncStatus('connected', '실시간 동기화');
-    // 현재 탭이 삭제 대상이면 다른 탭으로 전환
+    // 현재 탭이 삭제 대상이면 그룹의 다른 탭으로 전환, 없으면 빈 상태
     if (currentQuoteKey === targetKey) {
-      const remaining = getQuoteGroupKeys(consultant, baseName).filter(k => k !== targetKey);
+      const remaining = getQuoteGroupSorted(consultant, baseName).filter(g => g.key !== targetKey);
       if (remaining.length > 0) {
-        loadQuoteFromKey(remaining[0]);
+        loadQuoteFromKey(remaining[0].key);
+      } else {
+        // 그룹 비음 — items만 비우고 기업 정보는 유지
+        currentQuoteKey = null;
+        state.items = [];
+        state.variantLabel = '';
+        state.manualTierOverride = null;
+        state._order = null;
+        _lastSavedHash = computeStateHash();
       }
     }
     showToast(`탭 "${targetLabel}"이(가) 삭제되었습니다`);
@@ -7570,6 +7720,54 @@ async function closeQuoteTab(targetLabel) {
   } catch (err) {
     setSyncStatus('error', '삭제 실패');
     showToast('삭제 실패: ' + err.message);
+  }
+}
+
+/* ===== v9.15 v2: 2단 키 → 3단 키 자동 마이그레이션 (1회) =====
+ * - 첫 onSnapshot 후 staff 세션에서 실행
+ * - 2단 키 (consultant_base) 발견 시 3단 키 (consultant_base::견적 1) 로 이전
+ * - 충돌 시 skip
+ */
+let _migrationDone = false;
+async function migrateQuoteKeys() {
+  if (_migrationDone) return;
+  _migrationDone = true;
+  if (!window._firebase?.ok) return;
+  if (session?.role !== 'admin' && session?.role !== 'consultant') return;
+  const fb = window._firebase;
+  const legacyKeys = Object.keys(allQuotes).filter(k => !k.includes('::'));
+  if (legacyKeys.length === 0) return;
+  let migrated = 0;
+  for (const oldKey of legacyKeys) {
+    const q = allQuotes[oldKey];
+    if (!q) continue;
+    const parsed = parseQuoteKey(oldKey);
+    const variantLabel = q.variantLabel || '견적 1';
+    const newKey = buildQuoteKey(parsed.consultantName, parsed.baseName, variantLabel);
+    if (newKey === oldKey) continue;
+    if (allQuotes[newKey]) continue;  // 충돌 회피
+    const newDoc = {
+      ...q,
+      variantLabel: variantLabel,
+      order: q.order ?? 100,
+      createdAt: q.createdAt || q.updatedAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    try {
+      await fb.setDoc(fb.doc(fb.db, COLLECTION_QUOTES, newKey), newDoc);
+      await fb.deleteDoc(fb.doc(fb.db, COLLECTION_QUOTES, oldKey));
+      // 현재 열려 있는 키였다면 갱신
+      if (currentQuoteKey === oldKey) {
+        currentQuoteKey = newKey;
+        state.variantLabel = variantLabel;
+        state._order = newDoc.order;
+        _lastSavedHash = computeStateHash();
+      }
+      migrated++;
+    } catch (e) { console.warn('마이그레이션 실패:', oldKey, e); }
+  }
+  if (migrated > 0) {
+    showToast(`${migrated}개 견적을 새 탭 형식으로 마이그레이션했습니다`);
   }
 }
 
@@ -11486,11 +11684,9 @@ function renderClientList() {
     const itemCount = (q.items || []).length;
     const roleLabel = q.consultantRole === 'admin' ? '관리자' : '상담자';
     const histCount = (q.consultantHistory || []).length;
-    // v9.15: 탭 라벨 — '기본'이 아닌 경우만 노출 + tier 오버라이드 표시
-    const variantLabel = q.variantLabel || parseQuoteKey(k).variantLabel || '기본';
-    const variantChip = variantLabel !== '기본'
-      ? `<span style="display:inline-block;font-size:11px;padding:1px 6px;background:#f5ede0;color:#6a4a1c;border:1px solid #d4a44a;border-radius:3px;margin-left:6px;vertical-align:middle;">${escapeHtml(variantLabel)}</span>`
-      : '';
+    // v9.15 v2: 탭 라벨 칩 (항상 표시) + tier 오버라이드 칩
+    const variantLabel = q.variantLabel || parseQuoteKey(k).variantLabel || '견적 1';
+    const variantChip = `<span style="display:inline-block;font-size:11px;padding:1px 6px;background:#f5ede0;color:#6a4a1c;border:1px solid #d4a44a;border-radius:3px;margin-left:6px;vertical-align:middle;">${escapeHtml(variantLabel)}</span>`;
     const tierOverrideChip = q.manualTierOverride
       ? `<span style="display:inline-block;font-size:11px;padding:1px 6px;background:#fff4e6;color:#d9480f;border:1px solid #f76707;border-radius:3px;margin-left:4px;vertical-align:middle;">${escapeHtml(q.manualTierOverride)}</span>`
       : '';
@@ -13331,7 +13527,11 @@ function initAppEvents() {
     state.items = [];  // 기업 선택 후 자동 추가
     render();
   });
-  document.getElementById('saveBtn').addEventListener('click', () => { saveCurrentQuote(); });
+  document.getElementById('saveBtn').addEventListener('click', () => {
+    // 즉시 저장: pending debounce 취소 후 명시 호출
+    if (_autoSaveTimer) { clearTimeout(_autoSaveTimer); _autoSaveTimer = null; }
+    saveCurrentQuote({ silent: false });
+  });
   document.getElementById('settingsBtn').addEventListener('click', openSettings);
   document.getElementById('intlPresetBtn').addEventListener('click', openIntlPresetManager);
   document.getElementById('consultantBtn').addEventListener('click', openConsultantManager);
@@ -13492,6 +13692,10 @@ async function bootstrap() {
   const savedSession = loadSession();
   if (savedSession) {
     session = savedSession;
+    // v9.15 v2: 첫 로드 후 2단 키 마이그레이션 (staff만, 1회)
+    if (session.role === 'admin' || session.role === 'consultant') {
+      migrateQuoteKeys().catch(e => console.warn(e));
+    }
     if (session.role === 'admin' && session.clientName === ADMIN.name) { enterApp(); return; }
     if (session.role === 'consultant' && CONFIG.consultants[session.clientName]) { enterApp(); return; }
     if (session.role === 'client' && allQuotes[session.clientName]) { enterApp(); return; }
