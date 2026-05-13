@@ -8434,20 +8434,29 @@ function renderQuoteTabs() {
 
   const group = getQuoteGroupSorted(consultant, baseName);
 
-  // 그룹 0개: "+ 새 탭" + "초기화" 노출
+  // v9.21: 그룹 0개 → 가상 "견적 1" 탭으로 표시 (정상 레이아웃 유지)
+  //  - 빈 메시지 대신 활성 탭처럼 렌더하여 IP 그룹 영역이 정상 폭으로 표시됨
+  //  - 사용자가 항목을 입력하면 자동 저장이 실제 Firestore 문서를 생성
+  //  - is-empty 클래스를 제거하여 pane이 flex-center로 압축되지 않도록 함
   if (group.length === 0) {
+    if (!state.variantLabel || !state.variantLabel.trim()) {
+      state.variantLabel = '견적 1';
+    }
+    const virtualLabel = state.variantLabel || '견적 1';
     wrap.innerHTML = `
-      <div class="quote-tab-empty">이 기업의 견적 탭이 아직 없습니다.</div>
+      <div class="quote-tab active" title="기본 견적 탭 — 항목·암호 입력 시 자동 저장됩니다">
+        <span class="tab-label">${escapeHtml(virtualLabel)}</span>
+      </div>
       <div class="quote-tab-actions">
-        <button class="quote-tab-btn" id="addBlankTabBtn" title="빈 견적 탭 추가">+ 새 탭</button>
+        <button class="quote-tab-btn" id="addBlankTabBtn" title="가장 오른쪽에 빈 견적 탭 추가">+ 새 탭</button>
       </div>
       <div class="quote-tab-actions" style="margin-left:auto;">
-        <button class="quote-tab-btn quote-tab-reset" id="resetQuoteGroupBtn" title="이 기업의 모든 견적 탭 삭제 후 빈 견적 1개로 초기화">🗑 초기화</button>
+        <button class="quote-tab-btn quote-tab-reset" id="resetQuoteGroupBtn" title="현재 입력 내용 초기화">🗑 초기화</button>
       </div>
     `;
     wrap.querySelector('#addBlankTabBtn').addEventListener('click', () => addNewQuoteTab('blank'));
     wrap.querySelector('#resetQuoteGroupBtn').addEventListener('click', () => resetCurrentQuoteGroup());
-    if (pane) pane.classList.add('is-empty');
+    if (pane) pane.classList.remove('is-empty');  // v9.21: 정상 레이아웃 유지
     return;
   }
   if (pane) pane.classList.remove('is-empty');
