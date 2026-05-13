@@ -5370,13 +5370,14 @@ const COUNTRY_FLAGS = {
 };
 function getFlag(code) { return COUNTRY_FLAGS[code] || '🏳️'; }
 
-/* 국가 코드 → 대표 색상 (국기 이모지 대신 사용) */
+/* 국가 코드 → 대표 색상 (국기 이모지 대신 사용)
+ * v9.19: 개별국 신규 5개 (GB/ID/MY/SG/IN) 색상 — 카드 톤(따뜻한 갈색 액센트)에 맞춤 */
 const COUNTRY_COLORS = {
   KR: '#c60c30', US: '#3c3b6e', JP: '#bc002d', CN: '#de2910', EU: '#003399',
-  DE: '#000000', FR: '#0055a4', ES: '#aa151b', GB: '#012169', CH: '#d52b1e',
+  DE: '#000000', FR: '#0055a4', ES: '#aa151b', GB: '#5b6878', CH: '#d52b1e',
   CA: '#ff0000', AU: '#00247d', NZ: '#00247d', VN: '#da251d', TW: '#fe0000',
-  HK: '#de2910', SG: '#ef3340', TH: '#a51931', MY: '#010066', ID: '#ff0000',
-  IN: '#ff9933', PH: '#0038a8', RU: '#0039a6', MX: '#006341', BR: '#009c3b',
+  HK: '#de2910', SG: '#a64242', TH: '#a51931', MY: '#b8943e', ID: '#c97543',
+  IN: '#d9783a', PH: '#0038a8', RU: '#0039a6', MX: '#006341', BR: '#009c3b',
   AE: '#00732f', SA: '#165d31', IL: '#0038b8', TR: '#e30a17',
   IT: '#008c45', SE: '#006aa7', NO: '#ef2b2d', DK: '#c8102e', FI: '#003580',
   KH: '#032ea1', LA: '#ce1126'
@@ -5391,6 +5392,8 @@ const DEFAULT_CURRENCIES = {
   JPY: { name: '일본 엔', visible: true, isBase: false, per100: true, order: 3 },
   CNY: { name: '중국 위안', visible: true, isBase: false, order: 4 },
   CHF: { name: '스위스 프랑', visible: true, isBase: false, order: 5 },
+  GBP: { name: '영국 파운드', visible: true, isBase: false, order: 6 },   // v9.19: GB 관납료용
+  SGD: { name: '싱가포르 달러', visible: true, isBase: false, order: 7 }, // v9.19: SG 출원용
   VND: { name: '베트남 동', visible: false, isBase: false, per100: true, order: 10 },
   TWD: { name: '대만 달러', visible: false, isBase: false, order: 11 },
   CAD: { name: '캐나다 달러', visible: false, isBase: false, order: 12 }
@@ -5467,11 +5470,73 @@ const DEFAULT_COUNTRIES = {
     // 송금수수료: PDF에 정보 없음 → 미국과 동일하게 추정 (KRW 13,000 + USD 20)
     remittanceFeeKRW: 13000, remittanceFeeForeign: 20, remittanceFeeForeignCurrency: 'USD',
     flagColor: '#000095'
+  },
+  // ===== v9.19: 영국·인도네시아·말레이시아·싱가포르·인도 개별국 출원 =====
+  GB: {
+    name: '영국', currency: 'GBP', type: 'foreign',
+    agentPerClass: 420000,
+    // 출처: Mewburn Ellis 2024 USD Tariff
+    // 대리인 USD / 관납료 GBP — duoCurrency
+    duoCurrency: true,
+    foreignAgentCurrency: 'USD',
+    // 대리인: 1류 $595, 추가 류 $75
+    foreignAgentFirst: 595, foreignAgentAdd: 75,
+    // 관납료: 1류 £170, 추가 류 £50
+    officialFirst: 170, officialAdd: 50,
+    remittanceFeeKRW: 13000, remittanceFeeForeign: 20, remittanceFeeForeignCurrency: 'USD',
+    flagColor: '#5b6878'
+  },
+  ID: {
+    name: '인도네시아', currency: 'USD', type: 'foreign',
+    agentPerClass: 420000,
+    // 출처: 인도네시아 현지 대리인 표준 수가 (할인 미적용)
+    // 대리인: 정가 380 USD, 추가 류 380 USD (단일)
+    // Disbursements (PoA·번역 등 잡비): 65 USD/류 → 대리인료에 통합 권장
+    // → 통합: 대리인 445 USD/류 (380 + 65)
+    foreignAgentFirst: 445, foreignAgentAdd: 445,
+    // 관납료: 195 USD/류
+    officialPerClass: 195,
+    remittanceFeeKRW: 13000, remittanceFeeForeign: 20, remittanceFeeForeignCurrency: 'USD',
+    flagColor: '#c97543'
+  },
+  MY: {
+    name: '말레이시아', currency: 'USD', type: 'foreign',
+    agentPerClass: 420000,
+    // 출처: Adastra 2025 fee schedule (Standard 명세 기준)
+    // 대리인: 1류 $300, 추가 류 $270 (multi-class)
+    foreignAgentFirst: 300, foreignAgentAdd: 270,
+    // 관납료: 250 USD/류 (Standard 명세, Non-standard는 +$32)
+    officialPerClass: 250,
+    remittanceFeeKRW: 13000, remittanceFeeForeign: 20, remittanceFeeForeignCurrency: 'USD',
+    flagColor: '#b8943e'
+  },
+  SG: {
+    name: '싱가포르', currency: 'SGD', type: 'foreign',
+    agentPerClass: 420000,
+    // 출처: 싱가포르 현지 대리인 표준 (자유 명세 기준)
+    // 자유 명세 기본값: 대리인 SGD 680, 추가 류 SGD 450
+    foreignAgentFirst: 680, foreignAgentAdd: 450,
+    // 자유 명세 관납료: SGD 380/류 (사전 승인 명세 시 1류 280 — 프리셋으로 분리)
+    officialPerClass: 380,
+    remittanceFeeKRW: 13000, remittanceFeeForeign: 20, remittanceFeeForeignCurrency: 'USD',
+    flagColor: '#a64242'
+  },
+  IN: {
+    name: '인도', currency: 'USD', type: 'foreign',
+    agentPerClass: 420000,
+    // 출처: 인도 현지 대리인 표준 (법인 출원인 기준)
+    // 대리인: 1류 $350, 추가 류 $100 (추정 — 영국 패턴 참고)
+    foreignAgentFirst: 350, foreignAgentAdd: 100,
+    // 관납료: 120 USD/류 (법인 기준)
+    officialPerClass: 120,
+    remittanceFeeKRW: 13000, remittanceFeeForeign: 20, remittanceFeeForeignCurrency: 'USD',
+    flagColor: '#d9783a'
   }
 };
 
-/* 국가 표시 순서 (요청: 한국, 미국, 중국, 일본, 유럽연합, 베트남, 기타) */
-const COUNTRY_ORDER = ['KR', 'US', 'CN', 'JP', 'TW', 'EU', 'VN'];
+/* 국가 표시 순서 (v9.19: GB/ID/MY/SG/IN 추가)
+ *  요청: 한국, 미국, 중국, 일본, 대만, 유럽연합, 영국, 베트남, 싱가포르, 말레이시아, 인도네시아, 인도, 기타 */
+const COUNTRY_ORDER = ['KR', 'US', 'CN', 'JP', 'TW', 'EU', 'GB', 'VN', 'SG', 'MY', 'ID', 'IN'];
 function sortedCountryCodes() {
   const all = Object.keys(CONFIG.countries);
   const ordered = COUNTRY_ORDER.filter(c => all.includes(c));
@@ -5576,6 +5641,116 @@ const DEFAULT_INTL_PRESETS = {
     lines: [
       { id: 'agent_each',    label: '대리인 수수료 (류당)', amount: 320, currency: 'USD', category: 'foreign_agent',    perClassMode: 'each' },
       { id: 'official_each', label: 'TIPO 관납료 (류당)',  amount: 100, currency: 'USD', category: 'foreign_official', perClassMode: 'each' }
+    ]
+  },
+
+  // ===== v9.19: 영국 상표 - Mewburn Ellis - 출원 =====
+  // 출처: Mewburn Ellis 2024 USD Tariff. 대리인 USD / 관납료 GBP 듀얼통화
+  'gb_tm_mewburn_filing': {
+    country: 'GB',
+    rightType: 'trademark',
+    agentKey: 'mewburn',
+    agentLabel: 'Mewburn Ellis',
+    stage: 'filing',
+    label: '영국 상표 출원 (Mewburn Ellis)',
+    currency: 'USD',
+    effectiveDate: '2024-01-01',
+    notes: 'Mewburn Ellis (UK) 2024 USD Tariff 기준. 대리인 수수료는 USD, 관납료는 GBP 듀얼통화. 우선권 주장 시 대리인료 +$75 별도(본 프리셋 미포함). 검색·OA·등록 단계 별도.',
+    lines: [
+      { id: 'agent_first',   label: '대리인 수수료 (1류)',    amount: 595, currency: 'USD', category: 'foreign_agent',    perClassMode: 'first' },
+      { id: 'agent_add',     label: '대리인 수수료 (류 추가)', amount:  75, currency: 'USD', category: 'foreign_agent',    perClassMode: 'add'   },
+      { id: 'official_first', label: 'UKIPO 관납료 (1류)',    amount: 170, currency: 'GBP', category: 'foreign_official', perClassMode: 'first' },
+      { id: 'official_add',   label: 'UKIPO 관납료 (류 추가)', amount:  50, currency: 'GBP', category: 'foreign_official', perClassMode: 'add'   }
+    ]
+  },
+
+  // ===== v9.19: 인도네시아 상표 - 출원 (할인 미적용) =====
+  'id_tm_standard_filing': {
+    country: 'ID',
+    rightType: 'trademark',
+    agentKey: 'standard',
+    agentLabel: 'Indonesia 표준 대리인',
+    stage: 'filing',
+    label: '인도네시아 상표 출원 (할인 미적용)',
+    currency: 'USD',
+    effectiveDate: '2024-01-01',
+    notes: '인도네시아 현지 대리인 표준 수가. 할인 미적용 정가($380) 적용. Disbursements(PoA 공증·번역 등 잡비, $65/류)는 대리인료에 통합. 우선권 주장 옵션 $35 별도(본 프리셋 미포함).',
+    lines: [
+      { id: 'agent_each',    label: '대리인 수수료 (류당, Disbursement 포함)', amount: 445, currency: 'USD', category: 'foreign_agent',    perClassMode: 'each' },
+      { id: 'official_each', label: 'DGIP 관납료 (류당)',                       amount: 195, currency: 'USD', category: 'foreign_official', perClassMode: 'each' }
+    ]
+  },
+
+  // ===== v9.19: 말레이시아 상표 - Adastra - 출원 (Standard 명세) =====
+  'my_tm_adastra_filing': {
+    country: 'MY',
+    rightType: 'trademark',
+    agentKey: 'adastra',
+    agentLabel: 'Adastra IP',
+    stage: 'filing',
+    label: '말레이시아 상표 출원 (Adastra, Standard 명세)',
+    currency: 'USD',
+    effectiveDate: '2025-01-01',
+    notes: 'Adastra IP (Malaysia) 2025 기준. Standard 명세 사용 시 관납료 $250. Non-standard 명세 시 +$32($282/류) — 별도 프리셋 또는 견적 시 조정. 우선권 주장 WAIVED (말레이시아 면제).',
+    lines: [
+      { id: 'agent_first',   label: '대리인 수수료 (1류)',    amount: 300, currency: 'USD', category: 'foreign_agent',    perClassMode: 'first' },
+      { id: 'agent_add',     label: '대리인 수수료 (류 추가)', amount: 270, currency: 'USD', category: 'foreign_agent',    perClassMode: 'add'   },
+      { id: 'official_each', label: 'MyIPO 관납료 (류당, Standard)', amount: 250, currency: 'USD', category: 'foreign_official', perClassMode: 'each' }
+    ]
+  },
+
+  // ===== v9.19: 싱가포르 상표 - 출원 (자유 명세, 기본) =====
+  'sg_tm_free_filing': {
+    country: 'SG',
+    rightType: 'trademark',
+    agentKey: 'free',
+    agentLabel: 'Singapore (자유 명세)',
+    stage: 'filing',
+    label: '싱가포르 상표 출원 (자유 명세)',
+    currency: 'SGD',
+    effectiveDate: '2024-01-01',
+    notes: '싱가포르 현지 대리인 표준 — 자유 명세 기준. 사전 승인 명세 사용 시 1류 관납료 SGD 280 — 별도 프리셋 사용. 우선권 주장 옵션 SGD 120 + 서류 SGD 90 별도(본 프리셋 미포함).',
+    lines: [
+      { id: 'agent_first',    label: '대리인 수수료 (1류)',    amount: 680, currency: 'SGD', category: 'foreign_agent',    perClassMode: 'first' },
+      { id: 'agent_add',      label: '대리인 수수료 (류 추가)', amount: 450, currency: 'SGD', category: 'foreign_agent',    perClassMode: 'add'   },
+      { id: 'official_each',  label: 'IPOS 관납료 (류당, 자유 명세)', amount: 380, currency: 'SGD', category: 'foreign_official', perClassMode: 'each' }
+    ]
+  },
+
+  // ===== v9.19: 싱가포르 상표 - 출원 (사전 승인 명세) =====
+  'sg_tm_preapproved_filing': {
+    country: 'SG',
+    rightType: 'trademark',
+    agentKey: 'preapproved',
+    agentLabel: 'Singapore (사전 승인 명세)',
+    stage: 'filing',
+    label: '싱가포르 상표 출원 (사전 승인 명세)',
+    currency: 'SGD',
+    effectiveDate: '2024-01-01',
+    notes: '싱가포르 IPOS 사전 승인 명세(Pre-approved Specification) 사용 시 관납료 할인. 변호사 판단으로 자유 명세보다 우선 적용 가능한 경우에 선택. 우선권 주장·서류 별도.',
+    lines: [
+      { id: 'agent_first',    label: '대리인 수수료 (1류)',    amount: 680, currency: 'SGD', category: 'foreign_agent',    perClassMode: 'first' },
+      { id: 'agent_add',      label: '대리인 수수료 (류 추가)', amount: 450, currency: 'SGD', category: 'foreign_agent',    perClassMode: 'add'   },
+      { id: 'official_first', label: 'IPOS 관납료 (1류, 사전 승인)', amount: 280, currency: 'SGD', category: 'foreign_official', perClassMode: 'first' },
+      { id: 'official_add',   label: 'IPOS 관납료 (류 추가)',         amount: 380, currency: 'SGD', category: 'foreign_official', perClassMode: 'add'   }
+    ]
+  },
+
+  // ===== v9.19: 인도 상표 - 출원 (법인 출원인 기준) =====
+  'in_tm_corporate_filing': {
+    country: 'IN',
+    rightType: 'trademark',
+    agentKey: 'corporate',
+    agentLabel: 'India 표준 대리인 (법인)',
+    stage: 'filing',
+    label: '인도 상표 출원 (법인 출원인 기준)',
+    currency: 'USD',
+    effectiveDate: '2024-01-01',
+    notes: '인도 현지 대리인 표준. 법인 출원인 기준 (개인 $60 별도). 추가 류 단가는 수가표 미명시 → 영국 패턴 참고하여 관납료 $120/류, 대리인료 $100/류 추정. 정확한 금액은 견적 시 현지 대리인 확인 필요. 우선권 주장료는 수가표에 없음(별도 청구 가능).',
+    lines: [
+      { id: 'agent_first',    label: '대리인 수수료 (1류)',           amount: 350, currency: 'USD', category: 'foreign_agent',    perClassMode: 'first' },
+      { id: 'agent_add',      label: '대리인 수수료 (류 추가, 추정)',  amount: 100, currency: 'USD', category: 'foreign_agent',    perClassMode: 'add'   },
+      { id: 'official_each',  label: 'IPO 관납료 (류당, 법인)',       amount: 120, currency: 'USD', category: 'foreign_official', perClassMode: 'each' }
     ]
   },
 
@@ -10972,6 +11147,30 @@ function renderDesignIntlItem(item, idx) {
     `<option value="${p.id}" ${ds.intlPresetId === p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`
   ).join('');
 
+  // v9.19: KR 카드와 정렬을 맞추기 위한 "디자인 개수" 컬럼
+  //  - US/JP: 1디자인 고정 (disabled)
+  //  - CN: 1~30 가변 (primary에서 직접 선택)
+  let designCountColumnHtml;
+  if (country === 'CN') {
+    const cnOptions = Array.from({length: 30}, (_, i) => i + 1).map(n =>
+      `<option value="${n}" ${n === ds.intlDesignCount ? 'selected' : ''}>${n}디자인</option>`
+    ).join('');
+    designCountColumnHtml = `
+      <div class="field-compact">
+        <label>디자인 개수</label>
+        <select data-action="designIntlDesignCount" class="class-count-select" size="1">${cnOptions}</select>
+      </div>`;
+  } else {
+    // US/JP: 1디자인 고정
+    designCountColumnHtml = `
+      <div class="field-compact">
+        <label>디자인 개수</label>
+        <select class="class-count-select" size="1" disabled>
+          <option value="1" selected>1디자인 (고정)</option>
+        </select>
+      </div>`;
+  }
+
   const primary = document.createElement('div');
   primary.className = 'item-primary';
   primary.innerHTML = `
@@ -10980,6 +11179,7 @@ function renderDesignIntlItem(item, idx) {
       <label>국가 ${modeIndicator}</label>
       <select data-action="designCountry">${countryOptions}</select>
     </div>
+    ${designCountColumnHtml}
     <div class="field-mark">
       <label>디자인의 명칭 (선택)</label>
       <input type="text" data-action="designTitle" value="${escapeHtml(ds.title || '')}" placeholder="">
@@ -11049,15 +11249,8 @@ function renderDesignIntlItem(item, idx) {
         </div>
       ` : ''}
       ${country === 'CN' ? `
-        <!-- v9.18: 중국 디자인 개수 (관련 디자인 묶음 출원) -->
-        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:6px 0;">
-          <strong style="font-size:0.9em;min-width:90px;">디자인 개수:</strong>
-          <select data-action="designIntlDesignCount" style="width:120px;">
-            ${Array.from({length: 30}, (_, i) => i + 1).map(n =>
-              `<option value="${n}" ${n === ds.intlDesignCount ? 'selected' : ''}>${n}디자인</option>`
-            ).join('')}
-          </select>
-          <span class="muted" style="font-size:0.82em;">중국은 1출원에 관련 디자인 묶음 출원 가능 (첫 디자인 2,800 CNY + 추가 1,400 CNY/건)</span>
+        <div style="font-size:0.82em;color:var(--ink-muted);padding:4px 0;">
+          ※ 중국은 1출원에 관련 디자인 묶음 출원 가능 (첫 디자인 2,800 CNY + 추가 1,400 CNY/건). 디자인 개수는 상단 카드에서 선택.
         </div>
       ` : ''}
       ${country === 'JP' ? `
