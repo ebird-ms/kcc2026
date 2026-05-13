@@ -3753,6 +3753,7 @@
         <button class="pill-btn staff-only" id="settingsBtn">⚙️ 수수료 · 국가</button>
         <button class="pill-btn staff-only" id="intlPresetBtn">🌍 해외 프리셋</button>
         <button class="pill-btn admin-only" id="consultantBtn">👥 상담자 관리</button>
+        <button class="pill-btn admin-only" id="offlineBackupBtn" title="현재까지 저장된 모든 견적을 단일 HTML 파일로 다운로드 (Firebase 연결 없음, 오프라인 열람 가능)">📦 오프라인 백업</button>
       </div>
       <div class="topbar-right">
         <button class="pill-btn primary staff-only" id="saveBtn" title="자동 저장이 동작 중이지만, 즉시 저장하려면 클릭">💾 지금 저장</button>
@@ -15933,6 +15934,11 @@ function initAppEvents() {
   document.getElementById('settingsBtn').addEventListener('click', openSettings);
   document.getElementById('intlPresetBtn').addEventListener('click', openIntlPresetManager);
   document.getElementById('consultantBtn').addEventListener('click', openConsultantManager);
+  // v9.22: 전체 견적 오프라인 백업 (관리자 전용)
+  const offlineBackupBtn = document.getElementById('offlineBackupBtn');
+  if (offlineBackupBtn) {
+    offlineBackupBtn.addEventListener('click', exportAllQuotesOfflineBackup);
+  }
   document.getElementById('clientListBtn').addEventListener('click', () => {
     renderClientList();
     openModal('clientListModal');
@@ -16823,6 +16829,300 @@ window.exportItemsToWord = exportItemsToWord;
 window.exportItemsToPDF = exportItemsToPDF;
 window.exportSummaryToWord = exportSummaryToWord;
 window.exportSummaryToPDF = exportSummaryToPDF;
+
+/* ===== v9.22: 전체 견적 오프라인 백업 (관리자 전용) =====
+ * 현재까지 저장된 모든 견적을 단일 HTML 파일로 추출.
+ * 결과 파일은:
+ *  - Firebase 연결 없음 (스크립트 모두 정적 데이터)
+ *  - 합계 + 항목별 내역이 사전 렌더링됨 (계산 엔진 임베드 불필요)
+ *  - 좌측 목차 + 우측 본문 구조 (브라우저 또는 인쇄로 열람 가능)
+ *
+ * 순회 시 임시로 loadQuoteFromKey()로 state를 갈아끼우므로,
+ * 원본 state/currentQuoteKey를 저장 후 finally에서 복원한다.
+ */
+async function exportAllQuotesOfflineBackup() {
+  if (session?.role !== 'admin') {
+    showToast('관리자만 백업할 수 있습니다');
+    return;
+  }
+  const quoteKeys = Object.keys(allQuotes);
+  if (quoteKeys.length === 0) {
+    alert('백업할 견적이 없습니다.');
+    return;
+  }
+  if (!confirm(`전체 ${quoteKeys.length}건의 견적을 단일 HTML 파일로 백업합니다.\n시간이 다소 걸릴 수 있습니다. 계속하시겠습니까?`)) return;
+
+  // pending 자동 저장 flush
+  if (_autoSaveTimer) {
+    clearTimeout(_autoSaveTimer);
+    _autoSaveTimer = null;
+    try { await saveCurrentQuote({ silent: true }); } catch {}
+  }
+
+  // 원본 상태 백업
+  const savedState = JSON.parse(JSON.stringify(state));
+  const savedKey = currentQuoteKey;
+
+  setSyncStatus('syncing', `백업 생성 중... (0/${quoteKeys.length})`);
+
+  try {
+    // 그룹별 정렬: consultant → clientBaseName → variantLabel
+    const sortedKeys = quoteKeys.sort((a, b) => {
+      const qa = allQuotes[a], qb = allQuotes[b];
+      const ca = qa.consultantName || '', cb = qb.consultantName || '';
+      if (ca !== cb) return ca.localeCompare(cb, 'ko');
+      const na = qa.clientBaseName || '', nb = qb.clientBaseName || '';
+      if (na !== nb) return na.localeCompare(nb, 'ko');
+      const oa = qa.order ?? 999999, ob = qb.order ?? 999999;
+      if (oa !== ob) return oa - ob;
+      const va = qa.variantLabel || '', vb = qb.variantLabel || '';
+      return va.localeCompare(vb, 'ko');
+    });
+
+    // 목차 생성 (consultant_client 단위로 그룹핑)
+    const groupMap = {};
+    sortedKeys.forEach((key, i) => {
+      const q = allQuotes[key];
+      const gKey = `${q.consultantName || ''}_${q.clientBaseName || ''}`;
+      if (!groupMap[gKey]) groupMap[gKey] = { consultantName: q.consultantName || '', clientBaseName: q.clientBaseName || '', quotes: [] };
+      groupMap[gKey].quotes.push({ key, idx: i, q });
+    });
+
+    let tocHtml = '<aside class="backup-toc"><h2>📑 견적 목록</h2><ol class="toc-groups">';
+    Object.values(groupMap).forEach(g => {
+      tocHtml += `<li class="toc-group">
+        <div class="toc-group-title">${escapeHtml(g.consultantName)} · ${escapeHtml(g.clientBaseName)}</div>
+        <ul class="toc-quotes">`;
+      g.quotes.forEach(({ key, idx, q }) => {
+        const variantLabel = q.variantLabel || '견적 1';
+        const itemCount = Array.isArray(q.items) ? q.items.length : 0;
+        tocHtml += `<li><a href="#quote-${idx}">[${idx + 1}] ${escapeHtml(variantLabel)} <span class="toc-count">(${itemCount}건)</span></a></li>`;
+      });
+      tocHtml += '</ul></li>';
+    });
+    tocHtml += '</ol></aside>';
+
+    // 각 견적 본문
+    let mainHtml = '<main class="backup-main">';
+    mainHtml += `<header class="backup-header">
+      <h1>📦 이버드 특허법인 — 견적 전체 백업</h1>
+      <div class="backup-meta">
+        <span>생성일: <strong>${new Date().toLocaleString('ko-KR')}</strong></span>
+        <span>전체 견적 수: <strong>${quoteKeys.length}건</strong></span>
+        <span>기업 그룹 수: <strong>${Object.keys(groupMap).length}곳</strong></span>
+      </div>
+      <div class="backup-warning">
+        ⚠ 이 파일은 <strong>${new Date().toISOString().slice(0,10)}</strong> 시점의 오프라인 백업본입니다.
+        Firebase 연결 없이 정적 HTML로 작성되어 편집·동기화 불가, 열람 전용입니다.
+      </div>
+    </header>`;
+
+    for (let i = 0; i < sortedKeys.length; i++) {
+      const key = sortedKeys[i];
+      if (i % 5 === 0) {
+        setSyncStatus('syncing', `백업 생성 중... (${i + 1}/${quoteKeys.length})`);
+        // UI 갱신 양보
+        await new Promise(r => setTimeout(r, 0));
+      }
+      try {
+        loadQuoteFromKey(key);
+        const q = allQuotes[key] || {};
+        mainHtml += `<section class="quote-section" id="quote-${i}">`;
+        mainHtml += `<h2 class="quote-title">[${i + 1}] ${escapeHtml(state.consultantName)} · ${escapeHtml(state.clientName)} <span class="quote-variant">[${escapeHtml(state.variantLabel || '견적 1')}]</span></h2>`;
+        mainHtml += `<div class="quote-meta">
+          <span>작성일: <strong>${escapeHtml(state.quoteDate || '-')}</strong></span>
+          <span>항목 수: <strong>${state.items.length}건</strong></span>
+          <span>최종 수정: <strong>${escapeHtml((q.updatedAt || '').slice(0,16).replace('T',' '))}</strong></span>
+        </div>`;
+
+        if (state.items.length === 0) {
+          mainHtml += '<p class="empty-quote">출원 항목 없음 (빈 견적)</p>';
+        } else {
+          mainHtml += '<h3>견적 합계</h3>';
+          mainHtml += buildSummaryBodyHTML();
+          mainHtml += '<h3 style="margin-top:24px;">개별 항목 세부내역</h3>';
+          mainHtml += buildItemsBodyHTML();
+        }
+        mainHtml += '</section>';
+      } catch (e) {
+        console.warn('견적 백업 실패:', key, e);
+        mainHtml += `<section class="quote-section error" id="quote-${i}">
+          <h2 class="quote-title">[${i + 1}] ⚠ 로드 실패: ${escapeHtml(key)}</h2>
+          <p>이 견적은 백업 도중 오류가 발생했습니다: ${escapeHtml(e.message || '')}</p>
+        </section>`;
+      }
+    }
+    mainHtml += '</main>';
+
+    const fullHtml = buildOfflineBackupHTML(tocHtml + mainHtml, quoteKeys.length);
+
+    // 다운로드
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const filename = `kcc2026-quote-backup-${dateStr}.html`;
+    const blob = new Blob(['﻿' + fullHtml], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 200);
+
+    setSyncStatus('connected', '실시간 동기화');
+    showToast(`${quoteKeys.length}건 백업 다운로드 완료 (${filename})`);
+  } catch (err) {
+    console.error(err);
+    setSyncStatus('error', '백업 실패');
+    alert('백업 생성 중 오류: ' + err.message);
+  } finally {
+    // 원본 상태 복원
+    state = savedState;
+    currentQuoteKey = savedKey;
+    _lastSavedHash = computeStateHash();
+    render();
+  }
+}
+
+function buildOfflineBackupHTML(bodyHtml, totalQuotes) {
+  const dateStr = new Date().toLocaleString('ko-KR');
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>이버드 특허법인 견적 백업 - ${escapeHtml(new Date().toISOString().slice(0,10))}</title>
+<style>
+* { box-sizing: border-box; }
+body {
+  font-family: 'Noto Sans KR', 'Malgun Gothic', '맑은 고딕', sans-serif;
+  margin: 0; padding: 0;
+  background: #f3efe6; color: #2d2a26;
+  line-height: 1.5;
+}
+.backup-container { display: grid; grid-template-columns: 320px 1fr; min-height: 100vh; }
+.backup-toc {
+  background: #fdfbf7; border-right: 2px solid #d4c4b0;
+  padding: 18px 18px 24px; overflow-y: auto;
+  position: sticky; top: 0; height: 100vh;
+  font-size: 13px;
+}
+.backup-toc h2 { font-size: 15px; color: #7a3f2c; margin: 0 0 12px; border-bottom: 1px solid #d4c4b0; padding-bottom: 8px; }
+.toc-groups { list-style: none; padding: 0; margin: 0; }
+.toc-group { margin-bottom: 14px; }
+.toc-group-title {
+  font-weight: 600; font-size: 12px; color: #5a3a2c;
+  padding: 4px 6px; background: #f5f0e4; border-radius: 4px;
+}
+.toc-quotes { list-style: none; padding: 4px 0 0 10px; margin: 0; }
+.toc-quotes li { margin: 3px 0; }
+.toc-quotes a {
+  color: #2a2520; text-decoration: none; font-size: 12px;
+  display: block; padding: 3px 6px; border-radius: 3px;
+}
+.toc-quotes a:hover { background: #f5f0e4; color: #7a3f2c; }
+.toc-count { color: #8b7f70; font-size: 11px; }
+
+.backup-main { padding: 24px 32px; max-width: 1100px; }
+.backup-header {
+  background: white; border: 1px solid #d4c4b0; border-radius: 6px;
+  padding: 20px 24px; margin-bottom: 24px;
+}
+.backup-header h1 { font-size: 22px; color: #7a3f2c; margin: 0 0 10px; }
+.backup-meta { display: flex; gap: 22px; font-size: 13px; color: #5a3a2c; margin-bottom: 12px; }
+.backup-warning {
+  background: #fff3cd; border: 1px solid #d4a847; color: #856404;
+  padding: 8px 12px; border-radius: 4px; font-size: 12.5px;
+}
+
+.quote-section {
+  background: white; border: 1px solid #d4c4b0; border-radius: 6px;
+  padding: 20px 24px; margin-bottom: 18px;
+}
+.quote-section.error { border-color: #d4847a; background: #faf0ee; }
+.quote-title { font-size: 17px; color: #7a3f2c; margin: 0 0 10px; border-left: 4px solid #7a3f2c; padding-left: 10px; }
+.quote-variant { font-size: 14px; color: #8b5a3d; font-weight: 400; }
+.quote-meta {
+  display: flex; gap: 18px; font-size: 12.5px; color: #6b5f54;
+  padding: 6px 0; margin-bottom: 14px; border-bottom: 1px dotted #d4c4b0;
+}
+.empty-quote { color: #8b7f70; font-style: italic; padding: 12px; background: #faf8f3; border-radius: 4px; }
+.quote-section h3 { font-size: 14px; color: #5a3a2c; margin: 18px 0 8px; border-left: 3px solid #7a3f2c; padding-left: 8px; }
+
+/* 견적서 내부 스타일 (buildItemsBodyHTML / buildSummaryBodyHTML과 동일 패턴) */
+.doc-meta { font-size: 11.5px; color: #6b5f54; margin: 4px 0 14px; }
+.doc-meta table { border-collapse: collapse; margin: 0; }
+.doc-meta td { padding: 2px 8px; border: 1px solid #ddd; }
+.doc-meta td:first-child { background: #faf8f3; font-weight: 600; width: 90px; color: #5a3a2c; }
+h1, h2 { color: #2d2a26; }
+
+table.fee-table { width: 100%; border-collapse: collapse; margin: 8px 0 14px; font-size: 12px; }
+table.fee-table th, table.fee-table td { border: 1px solid #c9bfb2; padding: 5px 8px; text-align: left; vertical-align: top; }
+table.fee-table th { background: #7a3f2c; color: white; font-weight: 600; }
+table.fee-table tr.subtotal { background: #faf8f3; font-weight: 600; }
+table.fee-table tr.subtotal td { color: #7a3f2c; }
+table.fee-table td.num { text-align: right; font-family: 'JetBrains Mono', Consolas, monospace; white-space: nowrap; }
+table.fee-table td.total { font-weight: 700; color: #7a3f2c; }
+.item-card {
+  margin: 10px 0; padding: 12px 14px; border: 1px solid #d4c4b0;
+  border-radius: 4px; background: #fdfbf7;
+}
+.item-card-header { font-size: 13px; font-weight: 600; color: #7a3f2c; border-bottom: 1px solid #d4c4b0; padding-bottom: 5px; margin-bottom: 6px; }
+.item-meta { font-size: 11.5px; color: #6b5f54; margin-bottom: 6px; }
+.item-meta span { margin-right: 12px; }
+.summary-card {
+  background: #2d2a26; color: #fdfbf7; padding: 14px;
+  border-radius: 4px; margin: 12px 0;
+}
+.summary-card h2 { color: #e8d7c5; border-left-color: #e8d7c5; margin-top: 0; font-size: 14px; }
+.summary-card .sub-row {
+  display: flex; justify-content: space-between;
+  padding: 5px 0; border-bottom: 1px dotted rgba(255,255,255,0.2);
+  font-size: 11.5px;
+}
+.summary-card .sub-row:last-child { border-bottom: none; }
+.summary-card .grand {
+  font-size: 14px; font-weight: 700; color: #e8d7c5;
+  padding-top: 8px; margin-top: 4px; border-top: 2px solid rgba(255,255,255,0.3);
+}
+.support-block { padding: 10px 12px; margin: 8px 0; border-radius: 4px; border: 1px solid #c9bfb2; }
+.support-block.support { background: #f0f7ed; border-color: #8bb76f; }
+.support-block.extra { background: #fdf6e8; border-color: #d4a847; }
+.support-block h3 { margin-top: 0; color: #3e5a2e; font-size: 13px; border-left: 0; padding-left: 0; }
+.support-block.extra h3 { color: #8b5f1a; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; margin-left: 6px; }
+.badge.ok { background: #c8e4a8; color: #2a4a15; }
+.badge.over { background: #f4c9c9; color: #7a2020; }
+.badge.exact { background: #d4e4ef; color: #1a4a6e; }
+
+@media (max-width: 900px) {
+  .backup-container { grid-template-columns: 1fr; }
+  .backup-toc { position: static; height: auto; max-height: 320px; border-right: none; border-bottom: 2px solid #d4c4b0; }
+  .backup-main { padding: 16px; }
+}
+@media print {
+  body { background: white; }
+  .backup-container { display: block; }
+  .backup-toc { position: static; height: auto; max-height: none; page-break-after: always; }
+  .backup-main { padding: 0; max-width: none; }
+  .quote-section { page-break-after: always; box-shadow: none; }
+}
+</style>
+</head>
+<body>
+<div class="backup-container">
+${bodyHtml}
+</div>
+<footer style="text-align:center; padding:20px; color:#8b7f70; font-size:11px; border-top:1px solid #d4c4b0; margin-top:24px;">
+  이버드 특허법인 · KCC2026 견적 백업 · ${escapeHtml(dateStr)} · 전체 ${totalQuotes}건
+</footer>
+</body>
+</html>`;
+}
+
+window.exportAllQuotesOfflineBackup = exportAllQuotesOfflineBackup;
 
 // ===================== 교육컨설팅 모듈 =====================
 
