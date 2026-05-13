@@ -16830,15 +16830,19 @@ window.exportItemsToPDF = exportItemsToPDF;
 window.exportSummaryToWord = exportSummaryToWord;
 window.exportSummaryToPDF = exportSummaryToPDF;
 
-/* ===== v9.22: 전체 견적 오프라인 백업 (관리자 전용) =====
- * 현재까지 저장된 모든 견적을 단일 HTML 파일로 추출.
- * 결과 파일은:
- *  - Firebase 연결 없음 (스크립트 모두 정적 데이터)
- *  - 합계 + 항목별 내역이 사전 렌더링됨 (계산 엔진 임베드 불필요)
- *  - 좌측 목차 + 우측 본문 구조 (브라우저 또는 인쇄로 열람 가능)
+/* ===== v9.22 → v9.23: 전체 견적 오프라인 백업 (관리자 전용) =====
+ * v9.23: 견적 작성 화면을 그대로 캡처하는 DOM 스냅샷 방식으로 재설계.
+ * 각 견적을 한 번씩 로드·렌더하여 실제 UI(지원금 패널·IP 그룹 카드·견적 합계)를
+ * outerHTML로 캡처. 원본 앱의 <style>을 그대로 임베드해 시각적으로 동일하게 표시.
  *
- * 순회 시 임시로 loadQuoteFromKey()로 state를 갈아끼우므로,
- * 원본 state/currentQuoteKey를 저장 후 finally에서 복원한다.
+ * 결과 파일:
+ *  - Firebase 연결 없음 (정적 HTML)
+ *  - 견적 작성 시 보이는 카드 레이아웃·합계·VAT 분리 등이 그대로 보임
+ *  - 편집 버튼(✕, +항목 추가 등)은 CSS로 숨김 처리
+ *  - 인쇄·확대 친화적인 좌측 목차 + 우측 스냅샷 구조
+ *
+ * 순회 중 loadQuoteFromKey()로 state를 갈아끼우므로 원본 state/currentQuoteKey를
+ * 저장 후 finally에서 복원한다. 화면 깜빡임 방지를 위해 로딩 오버레이를 표시한다.
  */
 async function exportAllQuotesOfflineBackup() {
   if (session?.role !== 'admin') {
@@ -16850,7 +16854,7 @@ async function exportAllQuotesOfflineBackup() {
     alert('백업할 견적이 없습니다.');
     return;
   }
-  if (!confirm(`전체 ${quoteKeys.length}건의 견적을 단일 HTML 파일로 백업합니다.\n시간이 다소 걸릴 수 있습니다. 계속하시겠습니까?`)) return;
+  if (!confirm(`전체 ${quoteKeys.length}건의 견적을 견적 작성 화면 형태 그대로 백업합니다.\n시간이 다소 걸릴 수 있습니다. 계속하시겠습니까?`)) return;
 
   // pending 자동 저장 flush
   if (_autoSaveTimer) {
@@ -16863,10 +16867,11 @@ async function exportAllQuotesOfflineBackup() {
   const savedState = JSON.parse(JSON.stringify(state));
   const savedKey = currentQuoteKey;
 
-  setSyncStatus('syncing', `백업 생성 중... (0/${quoteKeys.length})`);
+  // 로딩 오버레이 표시
+  showBackupOverlay(`백업 준비 중... (0/${quoteKeys.length})`);
 
   try {
-    // 그룹별 정렬: consultant → clientBaseName → variantLabel
+    // 그룹별 정렬: consultant → clientBaseName → order → variantLabel
     const sortedKeys = quoteKeys.sort((a, b) => {
       const qa = allQuotes[a], qb = allQuotes[b];
       const ca = qa.consultantName || '', cb = qb.consultantName || '';
@@ -16879,7 +16884,7 @@ async function exportAllQuotesOfflineBackup() {
       return va.localeCompare(vb, 'ko');
     });
 
-    // 목차 생성 (consultant_client 단위로 그룹핑)
+    // 목차용 그룹 매핑
     const groupMap = {};
     sortedKeys.forEach((key, i) => {
       const q = allQuotes[key];
@@ -16888,12 +16893,49 @@ async function exportAllQuotesOfflineBackup() {
       groupMap[gKey].quotes.push({ key, idx: i, q });
     });
 
+    // 원본 앱 CSS 추출 (페이지 내 모든 <style> 블록)
+    let allCSS = '';
+    document.querySelectorAll('style').forEach(s => { allCSS += s.innerHTML + '\n'; });
+
+    // 각 견적 스냅샷 수집
+    let snapshotsHtml = '';
+    for (let i = 0; i < sortedKeys.length; i++) {
+      const key = sortedKeys[i];
+      updateBackupOverlay(`백업 생성 중... (${i + 1}/${quoteKeys.length})`, (i + 1) / sortedKeys.length);
+      // UI 갱신 양보
+      await new Promise(r => requestAnimationFrame(r));
+
+      try {
+        loadQuoteFromKey(key);
+        // 모든 항목·세부영역을 펼친 상태로 캡처 (계산 내역까지 보이도록)
+        (state.items || []).forEach(it => {
+          it.expanded = true;
+          it.detailOpen = true;
+        });
+        render();
+        // 렌더 정착 대기 (한 프레임)
+        await new Promise(r => requestAnimationFrame(r));
+
+        snapshotsHtml += captureQuoteScreenSnapshot(key, i);
+      } catch (e) {
+        console.warn('견적 백업 실패:', key, e);
+        snapshotsHtml += `<section class="backup-quote-snapshot error" id="quote-${i}">
+          <h2 class="snap-title">[${i + 1}] ⚠ 로드 실패: ${escapeHtml(key)}</h2>
+          <p style="color:#7a2020;">${escapeHtml(e.message || '알 수 없는 오류')}</p>
+        </section>`;
+      }
+    }
+
+    updateBackupOverlay('파일 생성 중...', 1);
+    await new Promise(r => setTimeout(r, 50));
+
+    // 목차 생성
     let tocHtml = '<aside class="backup-toc"><h2>📑 견적 목록</h2><ol class="toc-groups">';
     Object.values(groupMap).forEach(g => {
       tocHtml += `<li class="toc-group">
         <div class="toc-group-title">${escapeHtml(g.consultantName)} · ${escapeHtml(g.clientBaseName)}</div>
         <ul class="toc-quotes">`;
-      g.quotes.forEach(({ key, idx, q }) => {
+      g.quotes.forEach(({ idx, q }) => {
         const variantLabel = q.variantLabel || '견적 1';
         const itemCount = Array.isArray(q.items) ? q.items.length : 0;
         tocHtml += `<li><a href="#quote-${idx}">[${idx + 1}] ${escapeHtml(variantLabel)} <span class="toc-count">(${itemCount}건)</span></a></li>`;
@@ -16902,59 +16944,8 @@ async function exportAllQuotesOfflineBackup() {
     });
     tocHtml += '</ol></aside>';
 
-    // 각 견적 본문
-    let mainHtml = '<main class="backup-main">';
-    mainHtml += `<header class="backup-header">
-      <h1>📦 이버드 특허법인 — 견적 전체 백업</h1>
-      <div class="backup-meta">
-        <span>생성일: <strong>${new Date().toLocaleString('ko-KR')}</strong></span>
-        <span>전체 견적 수: <strong>${quoteKeys.length}건</strong></span>
-        <span>기업 그룹 수: <strong>${Object.keys(groupMap).length}곳</strong></span>
-      </div>
-      <div class="backup-warning">
-        ⚠ 이 파일은 <strong>${new Date().toISOString().slice(0,10)}</strong> 시점의 오프라인 백업본입니다.
-        Firebase 연결 없이 정적 HTML로 작성되어 편집·동기화 불가, 열람 전용입니다.
-      </div>
-    </header>`;
-
-    for (let i = 0; i < sortedKeys.length; i++) {
-      const key = sortedKeys[i];
-      if (i % 5 === 0) {
-        setSyncStatus('syncing', `백업 생성 중... (${i + 1}/${quoteKeys.length})`);
-        // UI 갱신 양보
-        await new Promise(r => setTimeout(r, 0));
-      }
-      try {
-        loadQuoteFromKey(key);
-        const q = allQuotes[key] || {};
-        mainHtml += `<section class="quote-section" id="quote-${i}">`;
-        mainHtml += `<h2 class="quote-title">[${i + 1}] ${escapeHtml(state.consultantName)} · ${escapeHtml(state.clientName)} <span class="quote-variant">[${escapeHtml(state.variantLabel || '견적 1')}]</span></h2>`;
-        mainHtml += `<div class="quote-meta">
-          <span>작성일: <strong>${escapeHtml(state.quoteDate || '-')}</strong></span>
-          <span>항목 수: <strong>${state.items.length}건</strong></span>
-          <span>최종 수정: <strong>${escapeHtml((q.updatedAt || '').slice(0,16).replace('T',' '))}</strong></span>
-        </div>`;
-
-        if (state.items.length === 0) {
-          mainHtml += '<p class="empty-quote">출원 항목 없음 (빈 견적)</p>';
-        } else {
-          mainHtml += '<h3>견적 합계</h3>';
-          mainHtml += buildSummaryBodyHTML();
-          mainHtml += '<h3 style="margin-top:24px;">개별 항목 세부내역</h3>';
-          mainHtml += buildItemsBodyHTML();
-        }
-        mainHtml += '</section>';
-      } catch (e) {
-        console.warn('견적 백업 실패:', key, e);
-        mainHtml += `<section class="quote-section error" id="quote-${i}">
-          <h2 class="quote-title">[${i + 1}] ⚠ 로드 실패: ${escapeHtml(key)}</h2>
-          <p>이 견적은 백업 도중 오류가 발생했습니다: ${escapeHtml(e.message || '')}</p>
-        </section>`;
-      }
-    }
-    mainHtml += '</main>';
-
-    const fullHtml = buildOfflineBackupHTML(tocHtml + mainHtml, quoteKeys.length);
+    // 최종 HTML
+    const fullHtml = buildOfflineBackupHTML(allCSS, tocHtml, snapshotsHtml, quoteKeys.length, Object.keys(groupMap).length);
 
     // 다운로드
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -16971,13 +16962,12 @@ async function exportAllQuotesOfflineBackup() {
       URL.revokeObjectURL(url);
     }, 200);
 
-    setSyncStatus('connected', '실시간 동기화');
     showToast(`${quoteKeys.length}건 백업 다운로드 완료 (${filename})`);
   } catch (err) {
     console.error(err);
-    setSyncStatus('error', '백업 실패');
     alert('백업 생성 중 오류: ' + err.message);
   } finally {
+    hideBackupOverlay();
     // 원본 상태 복원
     state = savedState;
     currentQuoteKey = savedKey;
@@ -16986,32 +16976,125 @@ async function exportAllQuotesOfflineBackup() {
   }
 }
 
-function buildOfflineBackupHTML(bodyHtml, totalQuotes) {
+/* 견적 작성 화면을 outerHTML로 캡처
+ *  - 상단 헤더(상담자/기업명/유형 배지/탭/작성일)
+ *  - 지원금 패널 (#supportPanel)
+ *  - IP 그룹들 (저작권/상표권/특허권/디자인권 .ip-group, 항목 있는 것만)
+ *  - 견적 합계 (.summary)
+ */
+function captureQuoteScreenSnapshot(key, idx) {
+  const q = allQuotes[key] || {};
+
+  // 유형 배지 (기본형/확장형/우수)
+  const tierBadgeEl = document.getElementById('companyTierBadge');
+  const tierBadgeText = tierBadgeEl ? (tierBadgeEl.textContent || '').trim() : '';
+  const tierBadgeCls = tierBadgeEl ? tierBadgeEl.className : '';
+  const tierBadgeHtml = tierBadgeText
+    ? `<span class="${escapeHtml(tierBadgeCls)}">${escapeHtml(tierBadgeText)}</span>`
+    : '';
+
+  // 헤더 메타 정보
+  const updatedAt = (q.updatedAt || '').replace('T', ' ').slice(0, 16);
+  const headerMetaHtml = `
+    <div class="snap-meta">
+      <span class="snap-meta-row"><span class="lbl">상담자</span><span class="val">${escapeHtml(state.consultantName || '-')}</span></span>
+      <span class="snap-meta-row"><span class="lbl">기업명</span><span class="val">${escapeHtml(state.clientName || '-')} ${tierBadgeHtml}</span></span>
+      <span class="snap-meta-row"><span class="lbl">탭</span><span class="val">${escapeHtml(state.variantLabel || '견적 1')}</span></span>
+      <span class="snap-meta-row"><span class="lbl">작성일</span><span class="val">${escapeHtml(state.quoteDate || '-')}</span></span>
+      <span class="snap-meta-row"><span class="lbl">항목 수</span><span class="val">${state.items.length}건</span></span>
+      <span class="snap-meta-row"><span class="lbl">최종 수정</span><span class="val">${escapeHtml(updatedAt || '-')}</span></span>
+    </div>
+  `;
+
+  // 지원금 패널
+  const supportPanelEl = document.getElementById('supportPanel');
+  const supportPanelHtml = supportPanelEl ? supportPanelEl.outerHTML : '';
+
+  // IP 그룹들 (항목 있는 것만)
+  let ipGroupsHtml = '';
+  document.querySelectorAll('.ip-group').forEach(group => {
+    const container = group.querySelector('.items-section');
+    if (container && container.children.length > 0) {
+      ipGroupsHtml += group.outerHTML;
+    }
+  });
+  if (!ipGroupsHtml) {
+    ipGroupsHtml = '<div class="empty-quote">출원 항목 없음 (빈 견적)</div>';
+  }
+
+  // 견적 합계
+  const summaryEl = document.querySelector('.summary');
+  const summaryHtml = summaryEl ? summaryEl.outerHTML : '';
+
+  return `<section class="backup-quote-snapshot" id="quote-${idx}">
+    <h2 class="snap-title">[${idx + 1}] ${escapeHtml(state.consultantName)} · ${escapeHtml(state.clientName)} <span class="snap-variant">[${escapeHtml(state.variantLabel || '견적 1')}]</span></h2>
+    ${headerMetaHtml}
+    ${supportPanelHtml}
+    <div class="snap-ip-groups">${ipGroupsHtml}</div>
+    ${summaryHtml}
+  </section>`;
+}
+
+/* 로딩 오버레이 헬퍼 (백업 진행 표시) */
+function showBackupOverlay(msg) {
+  let overlay = document.getElementById('backupOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'backupOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(45,42,38,0.85);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fdfbf7;font-family:Noto Sans KR,sans-serif;';
+    overlay.innerHTML = `
+      <div style="font-size:18px;font-weight:600;margin-bottom:14px;">📦 견적 백업 생성 중</div>
+      <div id="backupOverlayMsg" style="font-size:14px;margin-bottom:18px;opacity:0.9;">${escapeHtml(msg)}</div>
+      <div style="width:300px;height:10px;background:rgba(255,255,255,0.2);border-radius:5px;overflow:hidden;">
+        <div id="backupOverlayBar" style="height:100%;width:0%;background:#e8d7c5;transition:width 0.2s;"></div>
+      </div>
+      <div style="margin-top:14px;font-size:12px;opacity:0.7;">화면 깜빡임은 정상입니다. 잠시만 기다려 주세요...</div>
+    `;
+    document.body.appendChild(overlay);
+  } else {
+    overlay.style.display = 'flex';
+  }
+}
+function updateBackupOverlay(msg, ratio) {
+  const msgEl = document.getElementById('backupOverlayMsg');
+  const barEl = document.getElementById('backupOverlayBar');
+  if (msgEl) msgEl.textContent = msg;
+  if (barEl) barEl.style.width = Math.max(0, Math.min(100, Math.round(ratio * 100))) + '%';
+}
+function hideBackupOverlay() {
+  const overlay = document.getElementById('backupOverlay');
+  if (overlay) overlay.remove();
+}
+
+function buildOfflineBackupHTML(originalCSS, tocHtml, snapshotsHtml, totalQuotes, totalGroups) {
   const dateStr = new Date().toLocaleString('ko-KR');
+  const isoDate = new Date().toISOString().slice(0, 10);
   return `<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>이버드 특허법인 견적 백업 - ${escapeHtml(new Date().toISOString().slice(0,10))}</title>
+<title>이버드 특허법인 견적 백업 (${escapeHtml(isoDate)})</title>
+
+<!-- 원본 앱 CSS 임베드 (앱 화면과 동일 시각 적용) -->
 <style>
-* { box-sizing: border-box; }
-body {
-  font-family: 'Noto Sans KR', 'Malgun Gothic', '맑은 고딕', sans-serif;
-  margin: 0; padding: 0;
-  background: #f3efe6; color: #2d2a26;
-  line-height: 1.5;
-}
-.backup-container { display: grid; grid-template-columns: 320px 1fr; min-height: 100vh; }
+${originalCSS}
+</style>
+
+<!-- 백업 전용 추가 CSS (오버레이·목차·편집 버튼 숨김) -->
+<style>
+body { background: #f3efe6 !important; margin: 0; padding: 0; min-width: auto !important; }
+.backup-shell { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; }
+
 .backup-toc {
   background: #fdfbf7; border-right: 2px solid #d4c4b0;
-  padding: 18px 18px 24px; overflow-y: auto;
-  position: sticky; top: 0; height: 100vh;
-  font-size: 13px;
+  padding: 18px 16px 24px; overflow-y: auto;
+  position: sticky; top: 0; max-height: 100vh;
+  font-size: 13px; box-sizing: border-box;
 }
-.backup-toc h2 { font-size: 15px; color: #7a3f2c; margin: 0 0 12px; border-bottom: 1px solid #d4c4b0; padding-bottom: 8px; }
+.backup-toc h2 { font-size: 14px; color: #7a3f2c; margin: 0 0 12px; border-bottom: 1px solid #d4c4b0; padding-bottom: 6px; }
 .toc-groups { list-style: none; padding: 0; margin: 0; }
-.toc-group { margin-bottom: 14px; }
+.toc-group { margin-bottom: 12px; }
 .toc-group-title {
   font-weight: 600; font-size: 12px; color: #5a3a2c;
   padding: 4px 6px; background: #f5f0e4; border-radius: 4px;
@@ -17023,101 +17106,130 @@ body {
   display: block; padding: 3px 6px; border-radius: 3px;
 }
 .toc-quotes a:hover { background: #f5f0e4; color: #7a3f2c; }
-.toc-count { color: #8b7f70; font-size: 11px; }
+.toc-count { color: #8b7f70; font-size: 11px; margin-left: 4px; }
 
-.backup-main { padding: 24px 32px; max-width: 1100px; }
-.backup-header {
+.backup-main { padding: 20px 24px; max-width: 1200px; box-sizing: border-box; }
+.backup-page-header {
   background: white; border: 1px solid #d4c4b0; border-radius: 6px;
-  padding: 20px 24px; margin-bottom: 24px;
+  padding: 18px 22px; margin-bottom: 22px;
 }
-.backup-header h1 { font-size: 22px; color: #7a3f2c; margin: 0 0 10px; }
-.backup-meta { display: flex; gap: 22px; font-size: 13px; color: #5a3a2c; margin-bottom: 12px; }
-.backup-warning {
+.backup-page-header h1 { font-size: 21px; color: #7a3f2c; margin: 0 0 8px; font-family: 'Noto Sans KR', sans-serif; font-weight: 700; border: 0; }
+.backup-page-meta { display: flex; gap: 22px; font-size: 13px; color: #5a3a2c; margin-bottom: 10px; flex-wrap: wrap; }
+.backup-page-warning {
   background: #fff3cd; border: 1px solid #d4a847; color: #856404;
   padding: 8px 12px; border-radius: 4px; font-size: 12.5px;
 }
 
-.quote-section {
-  background: white; border: 1px solid #d4c4b0; border-radius: 6px;
-  padding: 20px 24px; margin-bottom: 18px;
+.backup-quote-snapshot {
+  background: #fdfbf7; border: 2px solid #d4c4b0; border-radius: 8px;
+  padding: 18px 22px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
-.quote-section.error { border-color: #d4847a; background: #faf0ee; }
-.quote-title { font-size: 17px; color: #7a3f2c; margin: 0 0 10px; border-left: 4px solid #7a3f2c; padding-left: 10px; }
-.quote-variant { font-size: 14px; color: #8b5a3d; font-weight: 400; }
-.quote-meta {
-  display: flex; gap: 18px; font-size: 12.5px; color: #6b5f54;
-  padding: 6px 0; margin-bottom: 14px; border-bottom: 1px dotted #d4c4b0;
+.backup-quote-snapshot.error { border-color: #d4847a; background: #faf0ee; }
+.snap-title {
+  font-size: 17px; color: #7a3f2c; margin: 0 0 12px;
+  border-left: 4px solid #7a3f2c; padding-left: 10px; border-bottom: 0;
+  font-family: 'Noto Sans KR', sans-serif; font-weight: 700;
 }
-.empty-quote { color: #8b7f70; font-style: italic; padding: 12px; background: #faf8f3; border-radius: 4px; }
-.quote-section h3 { font-size: 14px; color: #5a3a2c; margin: 18px 0 8px; border-left: 3px solid #7a3f2c; padding-left: 8px; }
+.snap-variant { font-size: 14px; color: #8b5a3d; font-weight: 500; }
+.snap-meta {
+  display: flex; gap: 18px; flex-wrap: wrap; font-size: 12.5px;
+  padding: 8px 12px; margin-bottom: 14px;
+  background: #f5f0e4; border-radius: 4px;
+}
+.snap-meta-row { display: inline-flex; align-items: center; gap: 6px; }
+.snap-meta-row .lbl { color: #8b7f70; font-size: 11px; }
+.snap-meta-row .val { color: #2a2520; font-weight: 600; }
+.snap-ip-groups { margin: 12px 0; }
+.empty-quote { color: #8b7f70; font-style: italic; padding: 18px; background: #faf8f3; border-radius: 4px; text-align: center; }
 
-/* 견적서 내부 스타일 (buildItemsBodyHTML / buildSummaryBodyHTML과 동일 패턴) */
-.doc-meta { font-size: 11.5px; color: #6b5f54; margin: 4px 0 14px; }
-.doc-meta table { border-collapse: collapse; margin: 0; }
-.doc-meta td { padding: 2px 8px; border: 1px solid #ddd; }
-.doc-meta td:first-child { background: #faf8f3; font-weight: 600; width: 90px; color: #5a3a2c; }
-h1, h2 { color: #2d2a26; }
+/* === 편집 버튼·툴바·로그인 화면 등 숨김 처리 === */
+#loginScreen, .topbar, .client-readonly-banner,
+.export-toolbar, .quote-tab-actions, .tab-close,
+.icon-btn, .add-item-btn, .add-row-btn,
+.fetch-btn, #fxGrid input, #moreFxGrid input,
+.quote-tab .tab-label-input,
+button[data-action], button[data-cls-field],
+.detail-toggle, .modal-backdrop, #toast,
+.sm-checkbox input[type="checkbox"], .sm-checkbox input[type="radio"] {
+  /* 일부 input은 시각 유지 필요 — 아래에서 개별 처리 */
+}
 
-table.fee-table { width: 100%; border-collapse: collapse; margin: 8px 0 14px; font-size: 12px; }
-table.fee-table th, table.fee-table td { border: 1px solid #c9bfb2; padding: 5px 8px; text-align: left; vertical-align: top; }
-table.fee-table th { background: #7a3f2c; color: white; font-weight: 600; }
-table.fee-table tr.subtotal { background: #faf8f3; font-weight: 600; }
-table.fee-table tr.subtotal td { color: #7a3f2c; }
-table.fee-table td.num { text-align: right; font-family: 'JetBrains Mono', Consolas, monospace; white-space: nowrap; }
-table.fee-table td.total { font-weight: 700; color: #7a3f2c; }
-.item-card {
-  margin: 10px 0; padding: 12px 14px; border: 1px solid #d4c4b0;
-  border-radius: 4px; background: #fdfbf7;
+/* 편집 전용 요소는 확실히 숨김 */
+.backup-quote-snapshot .icon-btn,
+.backup-quote-snapshot .add-item-btn,
+.backup-quote-snapshot .add-row-btn,
+.backup-quote-snapshot .quote-tab-actions,
+.backup-quote-snapshot .tab-close,
+.backup-quote-snapshot .export-toolbar,
+.backup-quote-snapshot .fetch-btn,
+.backup-quote-snapshot button[data-action],
+.backup-quote-snapshot button[data-ppe-action],
+.backup-quote-snapshot button[data-dpe-action],
+.backup-quote-snapshot .ipm-line-add-btn,
+.backup-quote-snapshot .ipm-line-note-toggle {
+  display: none !important;
 }
-.item-card-header { font-size: 13px; font-weight: 600; color: #7a3f2c; border-bottom: 1px solid #d4c4b0; padding-bottom: 5px; margin-bottom: 6px; }
-.item-meta { font-size: 11.5px; color: #6b5f54; margin-bottom: 6px; }
-.item-meta span { margin-right: 12px; }
-.summary-card {
-  background: #2d2a26; color: #fdfbf7; padding: 14px;
-  border-radius: 4px; margin: 12px 0;
-}
-.summary-card h2 { color: #e8d7c5; border-left-color: #e8d7c5; margin-top: 0; font-size: 14px; }
-.summary-card .sub-row {
-  display: flex; justify-content: space-between;
-  padding: 5px 0; border-bottom: 1px dotted rgba(255,255,255,0.2);
-  font-size: 11.5px;
-}
-.summary-card .sub-row:last-child { border-bottom: none; }
-.summary-card .grand {
-  font-size: 14px; font-weight: 700; color: #e8d7c5;
-  padding-top: 8px; margin-top: 4px; border-top: 2px solid rgba(255,255,255,0.3);
-}
-.support-block { padding: 10px 12px; margin: 8px 0; border-radius: 4px; border: 1px solid #c9bfb2; }
-.support-block.support { background: #f0f7ed; border-color: #8bb76f; }
-.support-block.extra { background: #fdf6e8; border-color: #d4a847; }
-.support-block h3 { margin-top: 0; color: #3e5a2e; font-size: 13px; border-left: 0; padding-left: 0; }
-.support-block.extra h3 { color: #8b5f1a; }
-.badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; margin-left: 6px; }
-.badge.ok { background: #c8e4a8; color: #2a4a15; }
-.badge.over { background: #f4c9c9; color: #7a2020; }
-.badge.exact { background: #d4e4ef; color: #1a4a6e; }
 
+/* 입력 요소는 보이게 두되 비활성화 처리 (현재 선택값 그대로 보이도록) */
+.backup-quote-snapshot input,
+.backup-quote-snapshot select,
+.backup-quote-snapshot textarea {
+  pointer-events: none !important;
+  background: #fafaf6 !important;
+  cursor: default !important;
+}
+.backup-quote-snapshot select { appearance: none; -webkit-appearance: none; padding-right: 8px !important; }
+
+/* IP 그룹은 전체 폭 */
+.backup-quote-snapshot .ip-group { margin-bottom: 18px; }
+.backup-quote-snapshot .item-primary,
+.backup-quote-snapshot .item-expanded { pointer-events: none; }
+
+/* 견적 합계는 그대로 노출 (Word/PDF 버튼만 숨김) */
+.backup-quote-snapshot .summary { background: white; border: 1px solid #d4c4b0; border-radius: 6px; padding: 16px 20px; margin-top: 14px; }
+
+/* 좁은 화면 대응 */
 @media (max-width: 900px) {
-  .backup-container { grid-template-columns: 1fr; }
-  .backup-toc { position: static; height: auto; max-height: 320px; border-right: none; border-bottom: 2px solid #d4c4b0; }
-  .backup-main { padding: 16px; }
+  .backup-shell { grid-template-columns: 1fr; }
+  .backup-toc { position: static; max-height: 280px; border-right: none; border-bottom: 2px solid #d4c4b0; }
+  .backup-main { padding: 14px; }
 }
+
+/* 인쇄 친화 */
 @media print {
-  body { background: white; }
-  .backup-container { display: block; }
-  .backup-toc { position: static; height: auto; max-height: none; page-break-after: always; }
+  body { background: white !important; }
+  .backup-shell { display: block; }
+  .backup-toc { position: static; max-height: none; border: 0; page-break-after: always; }
   .backup-main { padding: 0; max-width: none; }
-  .quote-section { page-break-after: always; box-shadow: none; }
+  .backup-quote-snapshot { page-break-after: always; box-shadow: none; border: 1px solid #aaa; }
 }
 </style>
 </head>
-<body>
-<div class="backup-container">
-${bodyHtml}
+<body class="is-admin">
+
+<div class="backup-shell">
+${tocHtml}
+<main class="backup-main">
+  <div class="backup-page-header">
+    <h1>📦 이버드 특허법인 — 견적 전체 백업</h1>
+    <div class="backup-page-meta">
+      <span>생성일: <strong>${escapeHtml(dateStr)}</strong></span>
+      <span>전체 견적 수: <strong>${totalQuotes}건</strong></span>
+      <span>기업 그룹 수: <strong>${totalGroups}곳</strong></span>
+    </div>
+    <div class="backup-page-warning">
+      ⚠ 이 파일은 <strong>${escapeHtml(isoDate)}</strong> 시점의 오프라인 백업본입니다.
+      Firebase 연결 없이 정적 HTML로 작성되어 편집·동기화 불가, 열람 전용입니다.
+      모든 견적 항목은 자동 펼침 상태로 캡처되어 카드·계산식·합계가 그대로 표시됩니다.
+    </div>
+  </div>
+  ${snapshotsHtml}
+  <footer style="text-align:center; padding:20px; color:#8b7f70; font-size:11px; border-top:1px solid #d4c4b0; margin-top:24px;">
+    이버드 특허법인 · KCC2026 견적 백업 · ${escapeHtml(dateStr)} · 전체 ${totalQuotes}건
+  </footer>
+</main>
 </div>
-<footer style="text-align:center; padding:20px; color:#8b7f70; font-size:11px; border-top:1px solid #d4c4b0; margin-top:24px;">
-  이버드 특허법인 · KCC2026 견적 백업 · ${escapeHtml(dateStr)} · 전체 ${totalQuotes}건
-</footer>
+
 </body>
 </html>`;
 }
