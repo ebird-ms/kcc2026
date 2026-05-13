@@ -6051,6 +6051,7 @@ function createItem(country='KR', type='trademark') {
       includeEnglishCert: false, // 영문 등록증 발급 옵션 (한국 전용)
       isSeries: false,          // 시리즈 저작물 여부 (중국/미국, 건수 ≥ 2일 때만 가능) (v8.24~)
       agentDelegate: false,     // 수행기관 서류작성 대행 (중국 전용) (v8.24~)
+      overseasWorkType: 'art',  // v9.20: 해외 저작권 등록 시 저작물 유형 (MY/IN/ID/TH/VN/PH)
       works: [createCopyrightWork()]  // 저작물별 세부 (저작물 종류 등)
     },
     // 특허권 전용 필드 (v9.0~) — type === 'patent' 일 때만 사용
@@ -6195,8 +6196,53 @@ const COPYRIGHT_FEES = {
     // 시리즈 (v8.24~)
     seriesCommitteeAdd: 350000, // 1건 = 500k, 2건 = 500k + 350k = 850k, 3건 = 1,200k ...
     seriesOfficialAdd: 22000    // 1건 = 70k, 2건 = 70k + 22k = 92k, 3건 = 114k ...
+  },
+  // ===== v9.20: 해외 저작권 등록 (동남아 6개국) =====
+  // 비용 구조: 해외비용(USD, 대리인+관납료 일괄) + 국내 수행기관 수수료(workType별 차등)
+  // 환율: USD 매매기준율 × 1.05 적용 (기존 getAppliedRate)
+  // VAT: 지원사업=전체 / 별도추가=수행기관만 (기존 정책)
+  // 가산: 저작물 개수 비례 (overseas × N + agency × N)
+  MY: {
+    name: '말레이시아', flagColor: '#b8943e', isOverseas: true,
+    overseasUSD: { art: 400, other: 400, program: 400 }
+  },
+  IN: {
+    name: '인도', flagColor: '#d9783a', isOverseas: true,
+    overseasUSD: { art: 300, other: 300, program: 300 }
+  },
+  ID: {
+    name: '인도네시아', flagColor: '#c97543', isOverseas: true,
+    overseasUSD: { art: 650, other: 650, program: 650 }
+  },
+  TH: {
+    name: '태국', flagColor: '#a51931', isOverseas: true,
+    overseasUSD: { art: 550, other: 550, program: 550 }
+  },
+  VN: {
+    name: '베트남', flagColor: '#da251d', isOverseas: true,
+    overseasUSD: { art: 300, other: 300, program: 300 }
+  },
+  PH: {
+    name: '필리핀', flagColor: '#0038a8', isOverseas: true,
+    overseasUSD: { art: 400, other: 400, program: 400 }
   }
 };
+
+/* v9.20: 해외 저작권 등록 수행기관 수수료 (workType별 차등)
+ * art:     미술·사진·도형      → 315,000원
+ * other:   어문·영상 등 기타    → 400,000원
+ * program: 컴퓨터프로그램       → 400,000원
+ */
+const COPYRIGHT_OVERSEAS_AGENCY_FEES = {
+  art:     { label: '미술·사진·도형',      agencyFee: 315000 },
+  other:   { label: '어문·영상 등 기타',   agencyFee: 400000 },
+  program: { label: '컴퓨터프로그램',       agencyFee: 400000 }
+};
+
+const COPYRIGHT_OVERSEAS_COUNTRIES = ['MY', 'IN', 'ID', 'TH', 'VN', 'PH'];
+function isCopyrightOverseas(country) {
+  return COPYRIGHT_OVERSEAS_COUNTRIES.includes(country);
+}
 
 /* 미국 시리즈 관납료 계산 (v8.24~)
  * n=2: 150,000원
@@ -6209,7 +6255,7 @@ function calcUsSeriesOfficial(n) {
   return 150000 + (n - 3) * 50000;
 }
 
-const COPYRIGHT_COUNTRY_ORDER = ['KR', 'US', 'CN'];
+const COPYRIGHT_COUNTRY_ORDER = ['KR', 'US', 'CN', 'MY', 'IN', 'ID', 'TH', 'VN', 'PH'];
 
 /* ===== 특허권 비용 상수 (v9.0~) =====
  * 저작권위원회 콘텐츠기업 권리화 지원사업용
@@ -6705,6 +6751,11 @@ function calcCopyrightItem(item) {
   const fees = COPYRIGHT_FEES[item.country];
   if (!fees) return null;
 
+  // v9.20: 해외 저작권 등록 분기 (MY/IN/ID/TH/VN/PH)
+  if (fees.isOverseas) {
+    return calcCopyrightOverseas(item);
+  }
+
   const isSeries = !!cp.isSeries && n >= 2 && (item.country === 'US' || item.country === 'CN');
   const agentDelegate = !!cp.agentDelegate && item.country === 'CN';
 
@@ -6802,6 +6853,90 @@ function calcCopyrightItem(item) {
     foreignOfficialCur: 0,
     foreignCostCur: 0,
     foreignCostKRW: 0,
+    otherKRW: 0,
+    classOfficialList: [],
+    supply,
+    vatableSupply,
+    nonVatableSupply,
+    vat,
+    totalKRW,
+    remitForeign: 0,
+    remitKRW: 0
+  };
+}
+
+/* ===== v9.20: 해외 저작권 등록 계산 (MY/IN/ID/TH/VN/PH) =====
+ * 비용 구조:
+ *  - 해외비용: 국가별 USD 단가 (대리인+관납료 일괄) × 저작물 개수
+ *    · 환산: USD × getAppliedRate('USD') (매매기준율 × 1.05 자동 적용)
+ *  - 국내 수행기관 수수료: workType별 차등 (art 315k / other 400k / program 400k) × 저작물 개수
+ * VAT:
+ *  - support / none: 전체 supply × 10%
+ *  - extra:          수행기관 수수료만 × 10%, 해외비용은 VAT 비대상
+ */
+function calcCopyrightOverseas(item) {
+  const cp = item.copyright || {};
+  const n = Math.max(1, parseInt(cp.worksCount) || 1);
+  const fees = COPYRIGHT_FEES[item.country];
+  if (!fees || !fees.isOverseas) return null;
+
+  // 저작물 유형 정규화 (없으면 'art' 기본)
+  const workType = ['art', 'other', 'program'].includes(cp.overseasWorkType) ? cp.overseasWorkType : 'art';
+  const agencyMeta = COPYRIGHT_OVERSEAS_AGENCY_FEES[workType];
+  const agencyPerWork = agencyMeta.agencyFee;
+  const agentFee = agencyPerWork * n;
+
+  // 해외비용 (USD → KRW, 매매기준율 × 1.05는 getAppliedRate에서 처리)
+  const usdPerWork = parseFloat(fees.overseasUSD?.[workType]) || 0;
+  const usdRate = getAppliedRate('USD') || 0;
+  const overseasPerWorkKRW = Math.round(usdPerWork * usdRate);
+  const foreignCostCur = usdPerWork * n;            // 표시용 외화 합계
+  const foreignCostKRW = overseasPerWorkKRW * n;    // 원화 환산 합계
+
+  const supply = agentFee + foreignCostKRW;
+
+  const mode = item.supportMode || 'support';
+  let vat, vatableSupply, nonVatableSupply;
+  if (mode === 'extra') {
+    vatableSupply    = agentFee;
+    nonVatableSupply = foreignCostKRW;
+    vat = Math.round(vatableSupply * 0.1);
+  } else {
+    vatableSupply    = supply;
+    nonVatableSupply = 0;
+    vat = Math.round(supply * 0.1);
+  }
+  const totalKRW = supply + vat;
+
+  return {
+    isCopyright: true,
+    isCopyrightOverseas: true,        // 별도 분기 식별
+    country: { type: 'copyright', name: fees.name, currency: 'USD' },
+    n: n,
+    curCode: 'USD',
+    rate: usdRate,
+    // 해외 저작권 전용 필드
+    overseasWorkType: workType,
+    overseasWorkLabel: agencyMeta.label,
+    usdPerWork,
+    overseasPerWorkKRW,
+    agencyPerWork,
+    // 호환 필드
+    agentFee,
+    committeeFee: 0,
+    officialFee: 0,
+    englishCertSurcharge: 0,
+    isSeries: false,
+    agentDelegate: false,
+    perWork: { agent: agencyPerWork, committee: 0, official: 0 },
+    seriesCommitteeAdd: 0,
+    seriesOfficialAdd: 0,
+    // 표준 필드 (computeAggregates 호환)
+    domesticOfficial: 0,
+    foreignAgentCur: usdPerWork * n,
+    foreignOfficialCur: 0,
+    foreignCostCur,
+    foreignCostKRW,
     otherKRW: 0,
     classOfficialList: [],
     supply,
@@ -8120,6 +8255,8 @@ function loadQuoteFromKey(key) {
         includeEnglishCert: !!it.copyright.includeEnglishCert,
         isSeries: !!it.copyright.isSeries,            // v8.24~
         agentDelegate: !!it.copyright.agentDelegate,  // v8.24~
+        // v9.20: 해외 저작권 등록 (MY/IN/ID/TH/VN/PH) 저작물 유형
+        overseasWorkType: ['art','other','program'].includes(it.copyright.overseasWorkType) ? it.copyright.overseasWorkType : 'art',
         works: Array.isArray(it.copyright.works) && it.copyright.works.length > 0
           ? it.copyright.works.map(w => ({ worksType: w.worksType || '', memo: w.memo || '' }))
           : [{ worksType: '', memo: '' }]
@@ -8129,6 +8266,7 @@ function loadQuoteFromKey(key) {
         includeEnglishCert: false,
         isSeries: false,
         agentDelegate: false,
+        overseasWorkType: 'art',
         works: [{ worksType: '', memo: '' }]
       },
       // 특허권 전용 필드 (v9.0~) — 이전 데이터에는 없으므로 기본값 채움
@@ -9823,9 +9961,11 @@ function renderSummary() {
     if (isCopyright) {
       // 저작권 항목: 컬럼 매핑 = 수행기관 / 위원회 / 관납료 / 기타 / VAT / 소계
       const cp = item.copyright || {};
-      const titleText = `${String(idx+1).padStart(2,'0')} · ${escapeHtml(r.country.name)} 저작권 ${r.n}건${cp.worksDescription ? ' · ' + escapeHtml(cp.worksDescription) : ''}`;
+      // v9.20: 해외 저작권은 별도 부제 (유형 표기)
+      const overseasSubLabel = r.isCopyrightOverseas ? ` · ${escapeHtml(r.overseasWorkLabel)}` : '';
+      const titleText = `${String(idx+1).padStart(2,'0')} · ${escapeHtml(r.country.name)} 저작권 ${r.n}건${overseasSubLabel}${cp.worksDescription ? ' · ' + escapeHtml(cp.worksDescription) : ''}`;
 
-      // 기타 컬럼: 한국 영문 등록증 가산만 표시. 그 외 국가는 "-"
+      // 기타 컬럼: 한국 영문 등록증 가산 또는 해외 USD 표시
       let etcCell = '<span class="primary-val">-</span>';
       if (item.country === 'KR' && cp.includeEnglishCert && r.englishCertSurcharge > 0) {
         const totalSur = r.englishCertSurcharge * r.n;
@@ -9838,15 +9978,21 @@ function renderSummary() {
       const agentCell = r.agentFee > 0
         ? `<span class="primary-val">${fmtKRW(r.agentFee)}</span>`
         : `<span class="primary-val">-</span>`;
-      const officialCell = r.officialFee > 0
-        ? `<span class="primary-val">${fmtKRW(r.officialFee)}</span>`
-        : `<span class="primary-val">-</span>`;
+      // v9.20: 해외는 "저작권 관납료" 컬럼에 해외비용(USD + KRW 환산)을 표시
+      let officialCell;
+      if (r.isCopyrightOverseas && r.foreignCostKRW > 0) {
+        officialCell = `<span class="primary-val">$${fmtNum(r.foreignCostCur)}</span><span class="converted">≈ ${fmtKRW(r.foreignCostKRW)}</span>`;
+      } else {
+        officialCell = r.officialFee > 0
+          ? `<span class="primary-val">${fmtKRW(r.officialFee)}</span>`
+          : `<span class="primary-val">-</span>`;
+      }
 
       out += `<div class="summary-row">
         <div class="desc">${titleText}</div>
         <div class="val" data-label="수행기관 수수료">${agentCell}</div>
         <div class="val" data-label="위원회 수수료">${committeeCell}</div>
-        <div class="val" data-label="저작권 관납료">${officialCell}</div>
+        <div class="val" data-label="${r.isCopyrightOverseas ? '해외비용' : '저작권 관납료'}">${officialCell}</div>
         <div class="val" data-label="기타">${etcCell}</div>
         <div class="val" data-label="VAT"><span class="primary-val">${fmtKRW(r.vat)}</span></div>
         <div class="val" data-label="소계"><span class="primary-val">${fmtKRW(r.totalKRW)}</span></div>
@@ -10499,19 +10645,30 @@ function renderCopyrightItem(item, idx) {
   const isStaff = session?.role === 'admin' || session?.role === 'consultant';
   const mode = item.supportMode || 'support';
   const cp = item.copyright || {};
+  const isOverseas = isCopyrightOverseas(item.country);
 
   const wrapper = document.createElement('div');
   wrapper.className = 'item copyright-item'
+    + (isOverseas ? ' copyright-overseas' : '')
     + (item.expanded ? ' expanded' : '')
     + (item.detailOpen ? ' detail-open' : '')
     + ' mode-' + mode;
   wrapper.dataset.id = item.id;
 
-  // 국가 옵션 (저작권은 KR/US/CN만)
-  const countryOptions = COPYRIGHT_COUNTRY_ORDER.map(code => {
+  // 국가 옵션 (v9.20: KR/US/CN + 해외 MY/IN/ID/TH/VN/PH)
+  // 그룹화: optgroup으로 국내·해외 구분
+  const domesticOpts = COPYRIGHT_COUNTRY_ORDER.filter(c => !isCopyrightOverseas(c)).map(code => {
     const fees = COPYRIGHT_FEES[code];
     return `<option value="${code}" ${item.country===code?'selected':''}>${getFlag(code)} ${escapeHtml(fees.name)}</option>`;
   }).join('');
+  const overseasOpts = COPYRIGHT_COUNTRY_ORDER.filter(c => isCopyrightOverseas(c)).map(code => {
+    const fees = COPYRIGHT_FEES[code];
+    return `<option value="${code}" ${item.country===code?'selected':''}>${getFlag(code)} ${escapeHtml(fees.name)}</option>`;
+  }).join('');
+  const countryOptions = `
+    <optgroup label="국내·미국·중국">${domesticOpts}</optgroup>
+    <optgroup label="해외 등록 (동남아 6개국)">${overseasOpts}</optgroup>
+  `;
 
   const modeIndicator = mode === 'support'
     ? '<span class="item-mode-indicator support">지원사업</span>'
@@ -10538,7 +10695,7 @@ function renderCopyrightItem(item, idx) {
         <select data-action="copyrightWorksCount" class="class-count-select" size="1">
           ${worksCountOptions}
         </select>
-        ${((item.country === 'CN' || item.country === 'US') && (cp.worksCount || 1) >= 2) ? `
+        ${((item.country === 'CN' || item.country === 'US') && !isOverseas && (cp.worksCount || 1) >= 2) ? `
           <span class="series-inline-toggle ${cp.isSeries ? 'active' : ''}" data-action="copyrightIsSeriesWrap" title="시리즈 저작물로 등록">
             <input type="checkbox" data-action="copyrightIsSeries" ${cp.isSeries ? 'checked' : ''}>
             <span class="series-label">시리즈</span>
@@ -10597,6 +10754,30 @@ function renderCopyrightItem(item, idx) {
     `;
   }
 
+  // v9.20: 해외 저작권 등록 (MY/IN/ID/TH/VN/PH) — workType 드롭다운
+  let overseasWorkTypeHtml = '';
+  if (isOverseas) {
+    const fees = COPYRIGHT_FEES[item.country];
+    const currentType = ['art','other','program'].includes(cp.overseasWorkType) ? cp.overseasWorkType : 'art';
+    const workTypeOptions = ['art','other','program'].map(t => {
+      const meta = COPYRIGHT_OVERSEAS_AGENCY_FEES[t];
+      const usd = fees.overseasUSD?.[t] || 0;
+      return `<option value="${t}" ${t === currentType ? 'selected' : ''}>${escapeHtml(meta.label)} · 수행기관 ${fmtNum(meta.agencyFee)}원 · 해외 $${usd}</option>`;
+    }).join('');
+    overseasWorkTypeHtml = `
+      <div class="expanded-section">
+        <div class="copyright-restricted-notice" style="background:#e7f5ff;border-color:#74c0fc;color:#1864ab;">
+          <strong>※ 해외 저작권 등록 (${escapeHtml(fees.name)}):</strong> 해외 대리인 수수료 + 관납료를 USD 일괄 견적으로 처리합니다.
+          저작물 유형에 따라 국내 수행기관 수수료가 차등 적용됩니다. 저작물 개수에 비례하여 가산됩니다.
+        </div>
+        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:6px 0;">
+          <strong style="font-size:0.9em;min-width:90px;">저작물 유형:</strong>
+          <select data-action="copyrightOverseasWorkType" style="flex:1;min-width:280px;">${workTypeOptions}</select>
+        </div>
+      </div>
+    `;
+  }
+
   // 시리즈 저작물 옵션 — v8.25~ 변경:
   // 체크박스 자체는 저작물 개수 옆으로 이동 (primary 영역).
   // 여기서는 미국 시리즈 체크 시 경고만 별도 표시 (중국은 경고 없음).
@@ -10643,11 +10824,8 @@ function renderCopyrightItem(item, idx) {
   // 계산식 내역
   const breakdownHtml = renderCopyrightBreakdown(item, result);
 
-  const expanded = document.createElement('div');
-  expanded.className = 'item-expanded';
-  expanded.innerHTML = `
-    ${englishCertHtml}
-    ${seriesHtml}
+  // v9.20: 해외 항목은 시리즈/CN 제약/저작물별 11종 분류 사용하지 않음 → 숨김 처리
+  const innerDetailHtml = isOverseas ? '' : `
     <div class="expanded-section">
       ${cnRestrictionHtml}
       <label class="detail-toggle">
@@ -10659,6 +10837,15 @@ function renderCopyrightItem(item, idx) {
       </div>
     </div>
     ${agentDelegateHtml}
+  `;
+
+  const expanded = document.createElement('div');
+  expanded.className = 'item-expanded';
+  expanded.innerHTML = `
+    ${englishCertHtml}
+    ${overseasWorkTypeHtml}
+    ${seriesHtml}
+    ${innerDetailHtml}
     <div class="expanded-section">
       <div class="expanded-header">계산식 내역</div>
       <div class="breakdown">${breakdownHtml}</div>
@@ -10722,8 +10909,8 @@ function bindCopyrightItemEvents(wrapper, item) {
         if (!item.copyright) return;
         // 국가가 바뀌면 영문 등록증 옵션은 한국 외에는 해제
         if (newCountry !== 'KR') item.copyright.includeEnglishCert = false;
-        // 시리즈는 중국/미국에서만 → 한국이 되면 해제
-        if (newCountry === 'KR') item.copyright.isSeries = false;
+        // 시리즈는 중국/미국에서만 → 한국이 되면 해제 (해외 국가도 해제)
+        if (newCountry === 'KR' || isCopyrightOverseas(newCountry)) item.copyright.isSeries = false;
         // 수행기관 대행은 중국 전용 → 다른 나라가 되면 해제
         if (newCountry !== 'CN') item.copyright.agentDelegate = false;
         // 중국으로 바뀌면 컴퓨터프로그램 선택된 저작물은 빈 값으로 초기화
@@ -10734,6 +10921,18 @@ function bindCopyrightItemEvents(wrapper, item) {
             }
           });
         }
+        // v9.20: 해외 국가 진입 시 overseasWorkType 기본값 보장
+        if (isCopyrightOverseas(newCountry) && !['art','other','program'].includes(item.copyright.overseasWorkType)) {
+          item.copyright.overseasWorkType = 'art';
+        }
+        render();
+      });
+    } else if (a === 'copyrightOverseasWorkType') {
+      // v9.20: 해외 저작물 유형 (art/other/program)
+      el.addEventListener('change', e => {
+        if (!item.copyright) item.copyright = { worksCount: 1, worksDescription: '', includeEnglishCert: false, isSeries: false, agentDelegate: false, overseasWorkType: 'art', works: [] };
+        const v = e.target.value;
+        item.copyright.overseasWorkType = ['art','other','program'].includes(v) ? v : 'art';
         render();
       });
     } else if (a === 'copyrightWorksCount') {
@@ -10828,6 +11027,50 @@ function renderCopyrightBreakdown(item, r) {
   const fees = COPYRIGHT_FEES[item.country];
   const mode = item.supportMode || 'support';
   let html = '';
+
+  // v9.20: 해외 저작권 등록 — 별도 내역 분기
+  if (r.isCopyrightOverseas) {
+    // 국내 수행기관
+    html += row(`국내 수행기관 수수료 (${escapeHtml(r.overseasWorkLabel)})`,
+      `<span class="num">${fmtNum(r.agencyPerWork)}원</span> <span class="op">×</span> <span class="num">${n}건</span>`,
+      fmtKRW(r.agentFee));
+
+    // 해외비용 USD 표시 (1건당)
+    html += row(`해외비용 (${escapeHtml(fees.name)}, 대리인+관납료 일괄)`,
+      `<span class="num">$${fmtNum(r.usdPerWork)}</span> <span class="op">×</span> <span class="num">${n}건</span> <span class="op">=</span> <span class="num">$${fmtNum(r.usdPerWork * n)}</span>`,
+      '');
+    // 해외비용 원화 환산
+    html += rowSub('해외비용 원화 환산',
+      `<span class="num">$${fmtNum(r.usdPerWork * n)}</span> <span class="op">×</span> <span class="num">₩${fmtRate(r.rate)}/USD</span> <span class="muted">(매매기준율 × 1.05 적용)</span>`,
+      fmtKRW(r.foreignCostKRW));
+
+    // VAT
+    if (mode === 'extra') {
+      html += row('VAT 대상 (수행기관)',
+        `<span class="muted">별도추가 모드 — 수행기관 수수료에만 VAT 부과</span>`,
+        fmtKRW(r.vatableSupply));
+      if (r.nonVatableSupply > 0) {
+        html += row('VAT 비대상 (해외비용)',
+          `<span class="muted">별도추가 모드 — VAT 부과 안 함</span>`,
+          fmtKRW(r.nonVatableSupply));
+      }
+      html += row('부가세 (수행기관 × 10%)',
+        `<span class="num">${fmtNum(r.vatableSupply)}</span> <span class="op">×</span> <span class="num">10%</span>`,
+        fmtKRW(r.vat));
+    } else {
+      html += row('공급가액 소계 (VAT 제외)',
+        `<span class="num">${fmtNum(r.agentFee)}</span> <span class="op">+</span> <span class="num">${fmtNum(r.foreignCostKRW)}</span>`,
+        fmtKRW(r.supply));
+      html += row('부가세 (VAT 10%)',
+        `<span class="num">${fmtNum(r.supply)}</span> <span class="op">×</span> <span class="num">10%</span>`,
+        fmtKRW(r.vat));
+    }
+
+    html += rowTotal('총 합계 (VAT 포함)',
+      `<span class="num">${fmtNum(r.supply)}</span> <span class="op">+</span> <span class="num">${fmtNum(r.vat)}</span>`,
+      fmtKRW(r.totalKRW));
+    return html;
+  }
 
   // 표시할 supply 구성 요소(0원이 아닌 것만)
   const supplyParts = [];
@@ -15996,6 +16239,40 @@ function buildItemDetailTableHTML(item, r) {
 <tbody>${rows.join('')}</tbody></table>`;
 }
 
+/* v9.20: 저작권 견적서 상세표 (KR/US/CN + 해외 6개국 통합 처리) */
+function buildCopyrightDetailTableHTML(item, r) {
+  const rows = [];
+  const cp = item.copyright || {};
+  const n = r.n;
+  const isOverseas = !!r.isCopyrightOverseas;
+
+  if (isOverseas) {
+    // 해외 저작권 등록 (MY/IN/ID/TH/VN/PH)
+    rows.push(`<tr><td>국내 수행기관 수수료</td><td class="num">${fmtKRW(r.agentFee)}</td><td>${escapeHtml(r.overseasWorkLabel)} · ${fmtNum(r.agencyPerWork)}원 × ${n}건</td></tr>`);
+    rows.push(`<tr><td>해외비용 (대리인+관납료)</td><td class="num">${fmtKRW(r.foreignCostKRW)}</td><td>$${fmtNum(r.usdPerWork)} × ${n}건 = $${fmtNum(r.foreignCostCur)} · 환율 ${fmtRate(r.rate)}</td></tr>`);
+  } else {
+    // 국내·미국·중국 저작권
+    if (r.agentFee > 0) {
+      rows.push(`<tr><td>수행기관 수수료</td><td class="num">${fmtKRW(r.agentFee)}</td><td>${n}건</td></tr>`);
+    }
+    if (r.committeeFee > 0) {
+      const seriesNote = r.isSeries ? ' (시리즈)' : '';
+      rows.push(`<tr><td>저작권위원회 수수료${seriesNote}</td><td class="num">${fmtKRW(r.committeeFee)}</td><td>${n}건</td></tr>`);
+    }
+    if (r.officialFee > 0) {
+      const seriesNote = r.isSeries ? ' (시리즈)' : '';
+      rows.push(`<tr><td>저작권등록 관납료${seriesNote}</td><td class="num">${fmtKRW(r.officialFee)}</td><td>${n}건${cp.includeEnglishCert ? ' · 영문 등록증 가산' : ''}</td></tr>`);
+    }
+  }
+
+  rows.push(`<tr><td>공급가액 (VAT 제외)</td><td class="num">${fmtKRW(r.supply)}</td><td>-</td></tr>`);
+  rows.push(`<tr><td>부가세 (VAT)</td><td class="num">${fmtKRW(r.vat)}</td><td>${item.supportMode === 'extra' ? '수행기관 × 10%' : '전체 × 10%'}</td></tr>`);
+  rows.push(`<tr class="subtotal"><td><strong>총계 (VAT 포함)</strong></td><td class="num total"><strong>${fmtKRW(r.totalKRW)}</strong></td><td>-</td></tr>`);
+  return `<table class="fee-table">
+<thead><tr><th style="width:38%;">항목</th><th style="width:22%;">금액</th><th>비고</th></tr></thead>
+<tbody>${rows.join('')}</tbody></table>`;
+}
+
 /* 특허권 견적서 상세표 (v9.0~) */
 function buildPatentDetailTableHTML(item, r) {
   if (item.country === 'KR') return buildPatentKRDetailTableHTML(item, r);
@@ -16276,7 +16553,13 @@ function buildItemsBodyHTML() {
         metaLine += `<span><strong>디자인 명칭:</strong> ${escapeHtml(ds.title)}</span>`;
       }
     } else if (isCopyright) {
-      metaLine = `<span><strong>저작물:</strong> ${item.copyright?.worksCount || 1}건</span>`;
+      const cp = item.copyright || {};
+      metaLine = `<span><strong>저작물:</strong> ${cp.worksCount || 1}건</span>`;
+      // v9.20: 해외 저작권은 유형 표기
+      if (r.isCopyrightOverseas) {
+        metaLine += `<span><strong>저작물 유형:</strong> ${escapeHtml(r.overseasWorkLabel)}</span>`;
+        metaLine += `<span><strong>해외비용:</strong> $${fmtNum(r.usdPerWork)} × ${r.n}건</span>`;
+      }
     } else {
       metaLine = `<span><strong>상품류:</strong> ${item.classCount}개류</span>`;
     }
@@ -16287,7 +16570,9 @@ function buildItemsBodyHTML() {
         ? buildDesignDetailTableHTML(item, r)
         : isMadrid
           ? buildMadridDetailTableHTML(item, r)
-          : buildItemDetailTableHTML(item, r);
+          : isCopyright
+            ? buildCopyrightDetailTableHTML(item, r)
+            : buildItemDetailTableHTML(item, r);
 
     const titleSuffix = isPatent
       ? (item.patent?.title ? '' : '')
@@ -16363,7 +16648,13 @@ function buildSummaryBodyHTML() {
       }
     } else if (isCopyright) {
       nameCell = escapeHtml(item.copyright?.worksDescription || '-');
-      scaleCell = `${item.copyright?.worksCount || 1}건`;
+      const baseScale = `${item.copyright?.worksCount || 1}건`;
+      // v9.20: 해외 저작권은 유형 표기
+      if (r.isCopyrightOverseas) {
+        scaleCell = `${baseScale} / ${escapeHtml(r.overseasWorkLabel)}`;
+      } else {
+        scaleCell = baseScale;
+      }
     } else {
       nameCell = escapeHtml(item.mark || '-');
       scaleCell = `${item.classCount}류`;
