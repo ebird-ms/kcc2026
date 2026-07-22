@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>하동관 · 마드리드 국제출원 + 홍콩 견적</title>
+<style>
+  * { box-sizing:border-box; }
+  body { font-family:"맑은 고딕","Malgun Gothic",sans-serif; margin:0; background:#eef1f6; color:#1f2933; font-size:14px; line-height:1.55; }
+  .wrap { max-width:1080px; margin:0 auto; padding:22px 16px 80px; }
+  h1 { font-size:22px; color:#1f3864; margin:6px 0 2px; }
+  .sub { color:#6b7684; font-size:13px; margin-bottom:18px; }
+  .card { background:#fff; border:1px solid #e3e8ee; border-radius:12px; padding:18px 20px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,.05); }
+  .card > h2 { font-size:15px; color:#1f3864; margin:0 0 12px; }
+
+  #login { max-width:380px; margin:12vh auto 0; }
+  #login .card { padding:28px 26px; }
+  #login h1 { text-align:center; font-size:20px; }
+  #login .sub { text-align:center; }
+  #login .fld { margin-bottom:12px; }
+  #login label { display:block; font-size:12px; color:#6b7684; margin-bottom:4px; }
+  #login input { width:100%; padding:10px 12px; border:1px solid #cbd2d9; border-radius:8px; font-size:14px; }
+  #login button { width:100%; padding:11px; border:none; border-radius:8px; background:#1f3864; color:#fff; font-size:15px; font-weight:600; cursor:pointer; margin-top:6px; }
+  #loginErr { color:#c0392b; font-size:12.5px; text-align:center; margin-top:10px; min-height:16px; }
+  #app { display:none; }
+
+  .result-bar { position:sticky; top:0; z-index:20; background:#1f3864; color:#fff; border-radius:12px; padding:16px 22px; margin-bottom:8px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; }
+  .result-bar .meta { font-size:12px; opacity:.9; }
+  .result-bar .opt { flex:1; min-width:240px; }
+  .result-bar .opt + .opt { border-left:1px solid rgba(255,255,255,.25); padding-left:18px; }
+  .result-bar .big { font-size:23px; font-weight:700; margin:2px 0; }
+
+  .preset-row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:6px; }
+  .preset-row button { border:1px solid #1f3864; background:#fff; color:#1f3864; border-radius:8px; padding:9px 16px; font-size:13.5px; font-weight:600; cursor:pointer; }
+  .preset-row button.on { background:#1f3864; color:#fff; }
+
+  table.sum { width:100%; border-collapse:collapse; }
+  table.sum th, table.sum td { padding:8px 10px; border-bottom:1px solid #eceff3; font-size:13px; }
+  table.sum th { text-align:left; color:#6b7684; font-weight:600; background:#fafbfc; }
+  table.sum td.num, table.sum th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  table.sum tr.total td { font-weight:700; border-top:2px solid #1f3864; font-size:15px; }
+  .hl { color:#1f3864; font-weight:700; }
+  .cost-note { font-size:12px; color:#6b7684; margin-top:8px; }
+  details.brk summary { cursor:pointer; color:#1f3864; font-weight:600; font-size:13px; }
+  .mk-block { border:1px solid #e8ecf1; border-radius:8px; padding:10px 12px; margin:8px 0; background:#fbfcfe; }
+  .mk-block .mh { font-weight:600; margin-bottom:4px; color:#1f3864; }
+  .tx-line { display:flex; justify-content:space-between; font-size:12.5px; color:#4a5560; padding:1px 0; }
+  .note { background:#f6f9ff; border:1px solid #d6e2f5; border-radius:10px; padding:14px 16px; font-size:12.8px; color:#3a4a63; }
+  .note b { color:#1f3864; }
+  .foot { text-align:center; color:#98a2ab; font-size:11.5px; margin-top:24px; }
+  @media print { body{background:#fff;} .preset-row,.result-bar{position:static;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div id="login">
+    <h1>하동관 상표출원 견적</h1>
+    <div class="sub">이버드 특허법인 · 전용 견적 페이지</div>
+    <div class="card">
+      <div class="fld"><label>아이디</label><input type="text" id="loginId" placeholder="아이디" autocomplete="off"></div>
+      <div class="fld"><label>비밀번호</label><input type="password" id="loginPw" placeholder="비밀번호" autocomplete="off"></div>
+      <button id="loginBtn">확인</button>
+      <div id="loginErr"></div>
+    </div>
+  </div>
+
+  <div id="app">
+    <h1>하동관 · 마드리드 국제출원 + 홍콩 견적</h1>
+    <div class="sub">표장(영문·한글·한자)과 국가를 아우른 두 가지 안입니다. · 이버드 특허법인</div>
+
+    <div class="result-bar">
+      <div class="opt">
+        <div class="meta">1안 · 영문·한글·한자 3개 표장 (미·일·싱·중 + 홍콩)</div>
+        <div class="big" id="sum1ex">-</div>
+        <div class="meta">부가세 별도 · <span id="sum1in">-</span> (부가세 포함)</div>
+      </div>
+      <div class="opt">
+        <div class="meta">2안 · 영문·한글 2개 표장 (한자 제외)</div>
+        <div class="big" id="sum2ex">-</div>
+        <div class="meta">부가세 별도 · <span id="sum2in">-</span> (부가세 포함)</div>
+      </div>
+    </div>
+    <div style="text-align:right;color:#6b7684;font-size:13px;margin:0 2px 16px;">현재 보기: <b id="curName" style="color:#1f3864;">1안</b></div>
+
+    <div class="card">
+      <h2>① 견적 안 선택</h2>
+      <div class="preset-row">
+        <button id="p1" onclick="showPlan(1)">1안 · 3개 표장 (영문·한글·한자)</button>
+        <button id="p2" onclick="showPlan(2)">2안 · 2개 표장 (영문·한글)</button>
+      </div>
+      <div class="cost-note">1안은 한자(河東舘)까지 포함한 최대 보호안, 2안은 한자를 제외해 비용을 낮춘 안입니다.</div>
+    </div>
+
+    <div class="card">
+      <h2>② 표장별 견적 요약</h2>
+      <table class="sum" id="markSummary"></table>
+    </div>
+
+    <div class="card">
+      <h2>③ 비용 구성</h2>
+      <table class="sum" id="costTable"></table>
+      <div class="cost-note">· 대리인 수수료는 저희 수수료이며, WIPO 수수료·해외 대리인료·관납료·송금료는 국제기구·각국 특허청에 납부되는 실비(대납)입니다.</div>
+    </div>
+
+    <div class="card">
+      <details class="brk" open>
+        <summary>표장별 지정국 상세 보기</summary>
+        <div id="breakdown" style="margin-top:8px;"></div>
+      </details>
+    </div>
+
+    <div class="card note">
+      <b>참고 안내</b><br>
+      · 국가 수와 표장(영문·한글·한자)이 많아 출원 건수가 늘어나면서 비용이 다소 크게 산정되었습니다. 표장·국가는 아래 상세를 참고해 조정하실 수 있습니다.<br>
+      · <b>홍콩</b>은 마드리드 비회원국이라 개별국으로 별도 출원합니다. <b>중국 43류</b>는 기존 등록(2026.7.6 만료)을 갱신하는 건으로 본 견적과 별개입니다.<br>
+      · 마드리드 기초는 기존 국내 등록(하동관·HADONGKWAN·河東舘)을 사용하여 국내 기초출원 추가비용은 없습니다.<br>
+      · 위 금액은 출원 단계 예상 비용이며, WIPO료·관납료는 국제 공시 기준으로 실제 송금 시점 환율(스위스 프랑·미국 달러)로 최종 정산됩니다.
+    </div>
+
+    <div class="foot" id="foot"></div>
+  </div>
+</div>
+
+<script>
+// ===== 로그인 =====
+const CREDS=[{id:'하동관',pw:'3568'},{id:'최민석',pw:'2354'},{id:'이버드',pw:'1234'}];
+function doLogin(){
+  const id=document.getElementById('loginId').value.trim();
+  const pw=document.getElementById('loginPw').value.trim();
+  if(CREDS.some(c=>c.id===id && c.pw===pw)){
+    document.getElementById('login').style.display='none';
+    document.getElementById('app').style.display='block';
+    init();
+  } else { document.getElementById('loginErr').textContent='아이디 또는 비밀번호가 올바르지 않습니다.'; }
+}
+document.getElementById('loginBtn').onclick=doLogin;
+document.getElementById('loginPw').addEventListener('keydown',e=>{ if(e.key==='Enter') doLogin(); });
+
+// ===== 계산 (kcc2026 v9.27 로직, 하동관 단가) =====
+const CHF=1823.13*1.05, USD=1478.4*1.05;
+const MF={SG:['perClass',265,0],CN:['firstAdd',220,110],US:['perClass',460,0],JP:['firstAdd',221,208]};
+const CNAME={SG:'싱가포르',CN:'중국',US:'미국',JP:'일본'};
+const AGENT_BASE=500000, AGENT_PER=400000, MD_REMIT=80000, KIPO=5000;
+function mfee(c,n){ const[t,b,a]=MF[c]; return t==='perClass'? b*n : b+a*(n-1); }
+function calcMadrid(desig){
+  let basic=653,csum=0,ccls=0; const per=[];
+  for(const c in desig){ const n=desig[c].length; const f=mfee(c,n); csum+=f; ccls+=n; per.push({c,cls:desig[c],f}); }
+  const wipoCHF=basic+csum, wipo=Math.round(wipoCHF*CHF);
+  const agent=AGENT_BASE+AGENT_PER*ccls, vat=Math.round(agent*0.1);
+  return {wipoCHF,wipo,agent,remit:MD_REMIT,kipo:KIPO,vat,total:wipo+agent+KIPO+MD_REMIT+vat,ccls,per};
+}
+function calcHK(cls){
+  const n=cls.length; if(!n) return null;
+  const agent=400000*n;
+  const foreign=Math.round((714+192*(n-1)+256+128*(n-1))*USD);
+  const remit=45000, vat=Math.round(agent*0.1);
+  return {agent,foreign,remit,vat,total:agent+foreign+remit+vat,n,cls};
+}
+const MARKS={
+  eng:{label:'영문 HADONGKWAN', madrid:{SG:[29,43],CN:[29,43],US:[29],JP:[29]}, hk:[29]},
+  kor:{label:'한글 하동관',     madrid:{SG:[29,43],CN:[29,43],US:[29],JP:[29,43]}, hk:[29]},
+  han:{label:'한자 河東舘',      madrid:{CN:[29,43],JP:[29,43]}, hk:[29]},
+};
+const PLANS={1:['eng','kor','han'],2:['eng','kor']};
+
+function calcPlan(keys){
+  let tot=0,agentSum=0,wipoSum=0,hkForeign=0,kipoSum=0,remitSum=0,vatSum=0;
+  const marks=[];
+  keys.forEach(k=>{
+    const md=calcMadrid(MARKS[k].madrid);
+    const h=calcHK(MARKS[k].hk);
+    const sub=md.total+(h?h.total:0);
+    tot+=sub; agentSum+=md.agent+(h?h.agent:0); wipoSum+=md.wipo;
+    hkForeign+=h?h.foreign:0; kipoSum+=md.kipo; remitSum+=md.remit+(h?h.remit:0);
+    vatSum+=md.vat+(h?h.vat:0);
+    marks.push({k,md,h,sub});
+  });
+  return {tot,supply:tot-vatSum,agentSum,wipoSum,hkForeign,kipoSum,remitSum,vatSum,marks};
+}
+function won(x){ return Math.round(x).toLocaleString('ko-KR')+'원'; }
+
+let curPlan=1;
+function showPlan(no){
+  curPlan=no;
+  document.getElementById('p1').classList.toggle('on',no===1);
+  document.getElementById('p2').classList.toggle('on',no===2);
+  document.getElementById('curName').textContent = no===1?'1안 (영문·한글·한자)':'2안 (영문·한글)';
+  const p=calcPlan(PLANS[no]);
+
+  // 표장별 요약
+  let h=`<tr><th>표장</th><th class="num">마드리드</th><th class="num">홍콩 개별국</th><th class="num">소계</th></tr>`;
+  p.marks.forEach(m=>{
+    h+=`<tr><td>${MARKS[m.k].label}</td><td class="num">${won(m.md.total)}</td><td class="num">${m.h?won(m.h.total):'-'}</td><td class="num"><b>${won(m.sub)}</b></td></tr>`;
+  });
+  h+=`<tr class="total"><td>합계 (부가세 포함)</td><td class="num"></td><td class="num"></td><td class="num">${won(p.tot)}</td></tr>`;
+  document.getElementById('markSummary').innerHTML=h;
+
+  // 비용 구성
+  document.getElementById('costTable').innerHTML=`
+    <tr><th>대리인 수수료 (마드리드 + 홍콩)</th><td class="num">${won(p.agentSum)}</td></tr>
+    <tr><th>WIPO 국제수수료</th><td class="num">${won(p.wipoSum)}</td></tr>
+    <tr><th>홍콩 해외 대리인료·관납료</th><td class="num">${won(p.hkForeign)}</td></tr>
+    <tr><th>국내(KIPO) 송부 관납료</th><td class="num">${won(p.kipoSum)}</td></tr>
+    <tr><th>해외 송금 수수료</th><td class="num">${won(p.remitSum)}</td></tr>
+    <tr><th class="hl">공급가액 (부가세 별도)</th><td class="num hl">${won(p.supply)}</td></tr>
+    <tr><th>부가세 (10%)</th><td class="num">${won(p.vatSum)}</td></tr>
+    <tr class="total"><td>총 합계 (부가세 포함)</td><td class="num">${won(p.tot)}</td></tr>`;
+
+  // 표장별 지정국 상세
+  let b='';
+  p.marks.forEach(m=>{
+    const md=m.md, desigStr=md.per.map(x=>`${CNAME[x.c]}(${x.cls.join('·')}류)`).join(', ');
+    b+=`<div class="mk-block"><div class="mh">${MARKS[m.k].label}</div>
+      <div class="tx-line"><span>마드리드 지정국: ${desigStr}</span><span>${won(md.total)}</span></div>
+      <div class="tx-line"><span>&nbsp;&nbsp;└ WIPO 수수료 (${md.wipoCHF} CHF)</span><span>${won(md.wipo)}</span></div>
+      <div class="tx-line"><span>&nbsp;&nbsp;└ 대리인 수수료·관납·송금·부가세</span><span>${won(md.total-md.wipo)}</span></div>`;
+    if(m.h) b+=`<div class="tx-line"><span>홍콩 개별국: ${m.h.cls.join('·')}류</span><span>${won(m.h.total)}</span></div>`;
+    b+=`</div>`;
+  });
+  document.getElementById('breakdown').innerHTML=b;
+}
+
+function init(){
+  const p1=calcPlan(PLANS[1]), p2=calcPlan(PLANS[2]);
+  document.getElementById('sum1ex').textContent=won(p1.supply);
+  document.getElementById('sum1in').textContent=won(p1.tot);
+  document.getElementById('sum2ex').textContent=won(p2.supply);
+  document.getElementById('sum2in').textContent=won(p2.tot);
+  document.getElementById('foot').textContent='이버드 특허법인 · 대표변리사 최민석 · T 02-508-8701 · '+new Date().getFullYear()+'. 본 견적은 안내용이며 최종 비용은 진행 시 확정됩니다.';
+  showPlan(1);
+}
+</script>
+</body>
+</html>
